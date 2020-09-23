@@ -17,7 +17,7 @@ to have data driven config files in JSON format.
 ```
 
 An extendible log server which makes it possible for applications
-to have create log messages in various ways.
+to create log messages in various ways.
 
 ```
 -rw-rw-r-- 1 jocke jocke  6605 sep 23 22:22 serv.erl
