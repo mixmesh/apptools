@@ -28,7 +28,7 @@ start(BaseDir, [Target|Rest], Modules) ->
             end;
         false ->
             start(BaseDir, Rest,
-                  [?l2b("unit_test_" ++ Target), Modules])
+                  [?l2a("unit_test_" ++ Target), Modules])
     end.
 
 return(Status) ->
@@ -39,7 +39,7 @@ run(_BaseDir, []) ->
 run(BaseDir, [Module|Rest]) ->
     try
         io:format("******** Module: ~s\n", [Module]),
-        apply(?b2a(Module), start, []),
+        apply(Module, start, []),
         io:format("++++ SUCCESS!\n\n"),
         run(BaseDir, Rest)
     catch

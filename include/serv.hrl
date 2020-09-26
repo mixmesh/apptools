@@ -16,7 +16,10 @@
                        system_terminate = not_set,
                        write_debug = not_set}).
 
--define(spawn_server(InitState, MessageHandler, Options),
+-define(spawn_server(InitState, MessageHandler),
+        serv:spawn_server(?MODULE, InitState, MessageHandler)).
+
+-define(spawn_server_opts(InitState, MessageHandler, Options),
         serv:spawn_server(?MODULE, InitState, MessageHandler, Options)).
 
 -endif.

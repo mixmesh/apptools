@@ -36,10 +36,12 @@
                         {'ok', pid()} | {'error', error_reason()}.
 
 start_link(Name, ConfigServ, ReadConfigCallback) ->
-    ?spawn_server(
+    ?spawn_server_opts(
        fun(Parent) ->
                init(Parent, ConfigServ, ReadConfigCallback, tty_available())
-       end, fun message_handler/1, #serv_options{name = Name}).
+       end,
+       fun message_handler/1,
+       #serv_options{name = Name}).
 
 %% Exported: toggle_logging
 

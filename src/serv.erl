@@ -17,7 +17,6 @@ spawn_server(ModuleName, InitState, MessageHandler) ->
     spawn_server(ModuleName, InitState, MessageHandler,
                  #serv_options{module_name = ModuleName}).
 
-
 spawn_server(ModuleName, InitState, MessageHandler,
              #serv_options{timeout = Timeout, link = Link} = Options) ->
     Parent = self(),
@@ -66,17 +65,17 @@ init(InitState, MessageHandler,
                 is_function(InitState) ->
                     case InitState(Parent) of
                         {ok, State} ->
-                            parent ! {self(), ok},
+                            Parent ! {self(), ok},
                             loop(MessageHandler, State);
                         {error, Reason} ->
-                            parent ! {self(), {error, Reason}}
+                            Parent ! {self(), {error, Reason}}
                     end;
                 true ->
                     Parent ! {self(), ok},
                     loop(MessageHandler, InitState)
             end;
         {error, Reason} ->
-            parent ! {self(), {error, Reason}}
+            Parent ! {self(), {error, Reason}}
     end.
 
 register_server(none) ->
