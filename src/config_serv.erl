@@ -105,11 +105,13 @@
 
 start_link(Name, ConfigFilename, ConfigSchema, ControlAddressPortPath,
            Handler) ->
-    ?spawn_server(
+    ?spawn_server_opts(
        fun(Parent) ->
                init(Parent, ConfigFilename, ConfigSchema,
                     ControlAddressPortPath, Handler)
-       end, fun message_handler/1, #serv_options{name = Name}).
+       end,
+       fun message_handler/1,
+       #serv_options{name = Name}).
 
 %% Exported: lookup
 
