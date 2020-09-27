@@ -91,34 +91,34 @@ register_server(Name) ->
 loop(MessageHandler, State) ->
     case MessageHandler(State) of
         stop ->
-          stopped;
-      {stop, {Pid, Ref}, Reply} ->
-          Pid ! {reply, Ref, Reply},
-          stopped;
-      {reply, {Pid, Ref}, Reply} ->
-          Pid ! {reply, Ref, Reply},
-          loop(MessageHandler, State);
-      {reply, {Pid, Ref}, Reply, NewState} ->
-          Pid ! {reply, Ref, Reply},
-          loop(MessageHandler, NewState);
-      noreply ->
-          loop(MessageHandler, State);
-      {noreply, NewState} ->
-          loop(MessageHandler, NewState);
-      {system, From, Request} ->
-          #serv_options{module_name = ModuleName,
-                        parent = Parent,
-                        debug_options = DebugOptions} =
-              get_options(),
-          sys:handle_system_msg(Request, From, Parent, ModuleName, DebugOptions,
-                                State);
-      {swap_message_handler, NewMessageHandler} ->
-          loop(NewMessageHandler, State);
-      {swap_message_handler, NewMessageHandler, NewState} ->
-          loop(NewMessageHandler, NewState);
-      UnknownMessage ->
-          throw({unknown_message, UnknownMessage})
-  end.
+            stopped;
+        {stop, {Pid, Ref}, Reply} ->
+            Pid ! {reply, Ref, Reply},
+            stopped;
+        {reply, {Pid, Ref}, Reply} ->
+            Pid ! {reply, Ref, Reply},
+            loop(MessageHandler, State);
+        {reply, {Pid, Ref}, Reply, NewState} ->
+            Pid ! {reply, Ref, Reply},
+            loop(MessageHandler, NewState);
+        noreply ->
+            loop(MessageHandler, State);
+        {noreply, NewState} ->
+            loop(MessageHandler, NewState);
+        {system, From, Request} ->
+            #serv_options{module_name = ModuleName,
+                          parent = Parent,
+                          debug_options = DebugOptions} =
+                get_options(),
+            sys:handle_system_msg(Request, From, Parent, ModuleName,
+                                  DebugOptions, State);
+        {swap_message_handler, NewMessageHandler} ->
+            loop(NewMessageHandler, State);
+        {swap_message_handler, NewMessageHandler, NewState} ->
+            loop(NewMessageHandler, NewState);
+        UnknownMessage ->
+            throw({unknown_message, UnknownMessage})
+    end.
 
 %% Exported: call
 

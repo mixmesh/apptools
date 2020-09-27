@@ -339,13 +339,13 @@ message_handler(#state{parent = Parent,
         reload ->
             case parse(ConfigFilename, ConfigSchema) of
                 {ok, NewJsonTerm} ->
-                    ?daemon_log("~s: Load succeeded", [ConfigFilename]),
+                    ?daemon_log(<<"~s: Load succeeded">>, [ConfigFilename]),
                     lists:foreach(fun(ClientPid) ->
                                           ClientPid ! config_updated
                                   end, Subscribers),
                     {noreply, S#state{json_term = NewJsonTerm}};
                 {error, Reason} ->
-                    ?daemon_log("~s: Load failed: ~s",
+                    ?daemon_log(<<"~s: Load failed: ~s">>,
                                 [ConfigFilename,
                                  format_error({config, Reason})]),
                     noreply
