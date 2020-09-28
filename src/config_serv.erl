@@ -4,7 +4,8 @@
 -export([subscribe/1, subscribe/2]).
 -export([tcp_send/3]).
 -export([format_error/1]).
--export_type([type_name/0, json_value/0, error_reason/0]).
+-export_type([type_name/0, json_path/0, json_term/0, json_value/0,
+              error_reason/0]).
 
 -include_lib("kernel/include/file.hrl").
 -include_lib("apptools/include/config_schema.hrl").
@@ -115,6 +116,8 @@ start_link(Name, ConfigFilename, ConfigSchema, ControlAddressPortPath,
 
 %% Exported: lookup
 
+-spec lookup(serv:name(), json_path(), json_value()) -> json_term().
+
 lookup(Name, JsonPath) ->
     case serv:call(Name, {lookup, JsonPath}, infinity) of
         not_found ->
@@ -122,8 +125,6 @@ lookup(Name, JsonPath) ->
         JsonTermOrValue ->
             JsonTermOrValue
     end.
-
--spec lookup(json_path(), json_value()) -> json_term().
 
 lookup(Name, JsonPath, DefaultJsonValue) ->
     case serv:call(Name, {lookup, JsonPath, DefaultJsonValue}, infinity) of
@@ -135,11 +136,11 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
 
 %% Exported: subscribe
 
+-spec subscribe(pid()) -> 'ok'.
+
 subscribe(Name) ->
     Name ! {subscribe, self()},
     ok.
-
--spec subscribe(pid()) -> 'ok'.
 
 subscribe(Name, Pid) ->
     Name ! {subscribe, Pid},
@@ -339,13 +340,13 @@ message_handler(#state{parent = Parent,
         reload ->
             case parse(ConfigFilename, ConfigSchema) of
                 {ok, NewJsonTerm} ->
-                    ?daemon_log(<<"~s: Load succeeded">>, [ConfigFilename]),
+                    ?daemon_log("~s: Load succeeded", [ConfigFilename]),
                     lists:foreach(fun(ClientPid) ->
                                           ClientPid ! config_updated
                                   end, Subscribers),
                     {noreply, S#state{json_term = NewJsonTerm}};
                 {error, Reason} ->
-                    ?daemon_log(<<"~s: Load failed: ~s">>,
+                    ?daemon_log("~s: Load failed: ~s",
                                 [ConfigFilename,
                                  format_error({config, Reason})]),
                     noreply

@@ -8,10 +8,17 @@
          system_replace_state/2,
          system_terminate/4,
          write_debug/3]).
+-export_type([name/0, spawn_server_result/0]).
 
 -include_lib("apptools/include/serv.hrl").
 
+-type name() :: atom() | pid().
+-type spawn_server_result() :: {ok, pid()} | {error, any()}.
+
 %% Exported: spawn_server
+
+-spec spawn_server(atom(), any(), fun(), #serv_options{}) ->
+                          spawn_server_result().
 
 spawn_server(ModuleName, InitState, MessageHandler) ->
     spawn_server(ModuleName, InitState, MessageHandler,
@@ -122,6 +129,9 @@ loop(MessageHandler, State) ->
 
 %% Exported: call
 
+-spec call(atom() | pid(), any(), integer() | infinity) ->
+                  any() | {error, timeout}.
+
 call(To, Request) ->
   call(To, Request, infinity).
 
@@ -150,8 +160,11 @@ call(To, Request, Timeout) ->
 
 %% Exported: reply
 
+-spec reply({pid(), reference()}, any()) -> ok.
+
 reply({Pid, Ref}, Reply) ->
-    Pid ! {reply, Ref, Reply}.
+    Pid ! {reply, Ref, Reply},
+    ok.
 
 %% Exported: system_code_changed
 

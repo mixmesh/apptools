@@ -5,6 +5,8 @@
 
 %% Exported: test
 
+-spec start([binary()]) -> no_return().
+
 start([BaseDir|Targets]) ->
   start(BaseDir, Targets, []).
 
