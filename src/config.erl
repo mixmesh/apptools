@@ -3,8 +3,7 @@
 
 %% Exported: lookup
 
--spec lookup(config_serv:json_term(), config_serv:json_value()) ->
-                    config_serv:json_value().
+-spec lookup(config_serv:json_term(), config_serv:json_value()) -> any().
 
 lookup(JsonPath) ->
     config_serv:lookup(obscrete_config_serv, JsonPath).
@@ -15,7 +14,7 @@ lookup(JsonPath, DefaultValue) ->
 %% Exported: lookup_children
 
 -spec lookup_children(config_serv:json_path(), config_serv:json_value()) ->
-                             [config_serv:json_value()].
+                             any().
 
 lookup_children([], _KeyValueList) ->
     [];

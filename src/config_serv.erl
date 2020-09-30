@@ -27,20 +27,20 @@
          }).
 
 -type type_name() ::
-        'bool' |
-        {'integer', integer(), integer() | 'unbounded'} |
-        {'float', float(), float() | 'unbounded'} |
-        'ipv4address' |
-        'ipv4address_port' |
-        'ipv6address' |
-        'base64' |
-        'readable_file' |
-        'writable_file' |
-        'readable_directory' |
-        'writable_directory' |
-        'atom' |
-        'string' |
-        'path'.
+        bool |
+        {integer, integer(), integer() | unbounded} |
+        {float, float(), float() | unbounded} |
+        ipv4address |
+        ipv4address_port |
+        ipv6address |
+        base64 |
+        readable_file |
+        writable_file |
+        readable_directory |
+        writable_directory |
+        atom |
+        string |
+        path.
 -type ip_address_port() :: {inet:ip4_address(), inet:port_number()}.
 -type enum() :: atom().
 -type json_value() :: inet:ip4_address() |
@@ -50,7 +50,7 @@
                       boolean() |
                       atom() |
                       binary() |
-                      'null' |
+                      null |
                       float().
 -type json_term() ::
         [{binary() | atom(), json_term()}] |
@@ -63,34 +63,33 @@
 -type json_name() :: atom() | {atom(), json_value()}.
 -type json_path() :: [json_name()].
 -type error_reason() ::
-        'already_started' |
-        {'config', config_error_reason()} |
-        {'posix', inet:posix()}.
+        {config, config_error_reason()} |
+        {posix, inet:posix()}.
 -type config_error_reason() ::
-        {'bad_json', term()} |
-        {'file_error', file:filename(), file:posix()} |
-        {'trailing', json_path()} |
-        {'expected', json_path(), json_path()} |
-        {'not_bool', json_value(), json_path()} |
-        {'integer_out_of_range', json_value(), integer(), integer(),
+        {bad_json, term()} |
+        {file_error, file:filename(), file:posix()} |
+        {trailing, json_path()} |
+        {expected, json_path(), json_path()} |
+        {not_bool, json_value(), json_path()} |
+        {integer_out_of_range, json_value(), integer(), integer(),
          json_path()} |
-        {'not_integer', json_value(), json_path()} |
-        {'float_out_of_range', json_value(), float(), float(),
+        {not_integer, json_value(), json_path()} |
+        {float_out_of_range, json_value(), float(), float(),
          json_path()} |
-        {'not_float', json_value(), json_path()} |
-        {'not_ipv4_address', json_value(), json_path()} |
-        {'not_ipv4_address_port', json_value(), json_path()} |
-        {'not_ipv6_address', json_value(), json_path()} |
-        {'not_base64', json_value(), json_path()} |
-        {'not_readable_file', string(), json_path()} |
-        {'not_writable_file', string(), json_path()} |
-        {'not_readable_directory', string(), json_path()} |
-        {'not_writable_directory', string(), json_path()} |
-        {'file_error', file:filename(), file:posix(), json_path()} |
-        {'not_atom', json_value(), json_path()} |
-        {'not_string', json_value(), json_path()} |
-        {'invalid_value', json_value(), json_path()} |
-        {'invalid_convert_value', json_path(), string()}.
+        {not_float, json_value(), json_path()} |
+        {not_ipv4_address, json_value(), json_path()} |
+        {not_ipv4_address_port, json_value(), json_path()} |
+        {not_ipv6_address, json_value(), json_path()} |
+        {not_base64, json_value(), json_path()} |
+        {not_readable_file, string(), json_path()} |
+        {not_writable_file, string(), json_path()} |
+        {not_readable_directory, string(), json_path()} |
+        {not_writable_directory, string(), json_path()} |
+        {file_error, file:filename(), file:posix(), json_path()} |
+        {not_atom, json_value(), json_path()} |
+        {not_string, json_value(), json_path()} |
+        {invalid_value, json_value(), json_path()} |
+        {invalid_convert_value, json_path(), string()}.
 
 %% Exported: start_link
 
@@ -98,11 +97,9 @@
                  ConfigFilename :: file:filename(),
                  ConfigSchema :: config_schema(),
                  ControlAddressPortPath :: json_path(),
-                 Handler :: fun((gen_tcp:socket()) -> 'ok')) ->
-                        {'ok', pid()} |
-                        {'error',
-                         'already_started'|
-                         {'config', config_error_reason()}}.
+                 Handler :: fun((gen_tcp:socket()) -> ok)) ->
+                        serv:spawn_server_result() |
+                        {config, config_error_reason()}.
 
 start_link(Name, ConfigFilename, ConfigSchema, ControlAddressPortPath,
            Handler) ->
@@ -136,7 +133,7 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
 
 %% Exported: subscribe
 
--spec subscribe(pid()) -> 'ok'.
+-spec subscribe(pid()) -> ok.
 
 subscribe(Name) ->
     Name ! {subscribe, self()},
@@ -149,7 +146,7 @@ subscribe(Name, Pid) ->
 %% Exported: tcp_send
 
 -spec tcp_send(inet:ip_address(), inet:port_number(), Message :: binary()) ->
-                      'ok' | {'error', {'posix', inet:posix()}}.
+                      ok | {error, {posix, inet:posix()}}.
 
 tcp_send(Address, Port, Message) ->
     case gen_tcp:connect(Address, Port,
@@ -163,95 +160,95 @@ tcp_send(Address, Port, Message) ->
 
 %% Exported: format_error
 
--spec format_error(error_reason()) -> iolist().
+-spec format_error(error_reason()) -> binary().
 
 format_error(already_started) ->
-    "Already started";
+    <<"Already started">>;
 format_error({posix, Reason}) ->
-    inet:format_error(Reason);
+    ?l2b(inet:format_error(Reason));
 format_error({config, {bad_json, Reason}}) ->
-%%    "Syntax error";
-    io_lib:format("Bad JSON: ~p", [Reason]);
+%%    <<"Syntax error">>;
+    ?l2b(io_lib:format("Bad JSON: ~p", [Reason]));
 format_error({config, {file_error, Filename, Reason}}) ->
-    io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]);
+    ?l2b(io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]));
 format_error({config, {trailing, JsonPath}}) ->
-    io_lib:format("No configuration expected after ~s",
-                  [json_path_to_string(JsonPath)]);
+    ?l2b(io_lib:format("No configuration expected after ~s",
+                       [json_path_to_string(JsonPath)]));
 format_error({config, {unexpected, Name}}) ->
-    io_lib:format("\"~s\" was not expected", [Name]);
+    ?l2b(io_lib:format("\"~s\" was not expected", [Name]));
 format_error({config, {expected, ExpectedJsonPath, JsonPath}}) ->
-    io_lib:format("Expected \"~s\", got \"~s\"",
-                  [json_path_to_string(ExpectedJsonPath),
-                   json_path_to_string(JsonPath)]);
+    ?l2b(io_lib:format("Expected \"~s\", got \"~s\"",
+                       [json_path_to_string(ExpectedJsonPath),
+                        json_path_to_string(JsonPath)]));
 format_error({config, {not_bool, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid boolean value",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid boolean value",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {integer_out_of_range, Value, From, To, JsonPath}}) ->
-    io_lib:format("~s: ~s must be in the range between ~w and ~w",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value), From, To]);
+    ?l2b(io_lib:format("~s: ~s must be in the range between ~w and ~w",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value), From, To]));
 format_error({config, {not_integer, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid integer",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid integer",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {float_out_of_range, Value, From, To, JsonPath}}) ->
-    io_lib:format("~s: ~s must be in the range between ~w and ~w",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value), From, To]);
+    ?l2b(io_lib:format("~s: ~s must be in the range between ~w and ~w",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value), From, To]));
 format_error({config, {not_float, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid float",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid float",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_ipv4_address, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid ipv4-address",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_ipv4_address_port, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid ipv4-address and port",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_ipv6_address, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid ipv6-address",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_base64, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid base64 value",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid base64 value",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_readable_file, Dir, JsonPath}}) ->
-    io_lib:format("~s: ~s is not readable",
-                  [json_path_to_string(JsonPath), Dir]);
+    ?l2b(io_lib:format("~s: ~s is not readable",
+                       [json_path_to_string(JsonPath), Dir]));
 format_error({config, {not_writable_file, Dir, JsonPath}}) ->
-    io_lib:format("~s: ~s is not writable",
-                  [json_path_to_string(JsonPath), Dir]);
+    ?l2b(io_lib:format("~s: ~s is not writable",
+                       [json_path_to_string(JsonPath), Dir]));
 format_error({config, {not_readable_directory, Dir, JsonPath}}) ->
-    io_lib:format("~s: ~s is readable",
-                  [json_path_to_string(JsonPath), Dir]);
+    ?l2b(io_lib:format("~s: ~s is readable",
+                       [json_path_to_string(JsonPath), Dir]));
 format_error({config, {not_writable_directory, Dir, JsonPath}}) ->
-    io_lib:format("~s: ~s is not writable",
-                  [json_path_to_string(JsonPath), Dir]);
+    ?l2b(io_lib:format("~s: ~s is not writable",
+                       [json_path_to_string(JsonPath), Dir]));
 format_error({config, {file_error, Filename, Reason, JsonPath}}) ->
-    io_lib:format("~s: ~s: ~s",
-                  [json_path_to_string(JsonPath), Filename,
-                   file:format_error(Reason)]);
+    ?l2b(io_lib:format("~s: ~s: ~s",
+                       [json_path_to_string(JsonPath), Filename,
+                        file:format_error(Reason)]));
 format_error({config, {not_atom, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid atom",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid atom",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_string, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid string",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid string",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {invalid_value, Value, JsonPath}}) ->
-    io_lib:format("~s: ~s is not a valid value",
-                  [json_path_to_string(JsonPath),
-                   json_value_to_string(Value)]);
+    ?l2b(io_lib:format("~s: ~s is not a valid value",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {invalid_convert_value, JsonPath, Reason}}) ->
-    io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]);
+    ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
 format_error(UnknownReason) ->
     ?error_log(UnknownReason),
-    "Internal error".
+    <<"Internal error">>.
 
 json_path_to_string([Name|Rest]) ->
     json_path_to_string(Rest, [?a2l(Name)]).
@@ -528,7 +525,7 @@ validate_value(_ConfigDir, #json_type{name = {float, _From, _To}}, Value,
                JsonPath) ->
     throw({not_float, Value, JsonPath});
 %% ipv4address
-validate_value(_ConfigDir, #json_type{name = 'ipv4address',
+validate_value(_ConfigDir, #json_type{name = ipv4address,
                                       convert = Convert}, Value, JsonPath)
   when is_binary(Value) ->
     case inet:parse_ipv4_address(?b2l(Value)) of

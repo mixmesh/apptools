@@ -27,13 +27,12 @@
 
 -type read_config_callback() ::
         fun(() -> {#daemon_log_info{}, #dbg_log_info{}, #error_log_info{}}).
-%% Falls back to term(), i.e. disk_log:open_error_rsn() type is not exported
--type error_reason() :: 'already_started' | term().
+-type error_reason() :: already_started | term().
 
 %% Exported: start_link
 
 -spec start_link(atom(), atom(), read_config_callback()) ->
-                        {'ok', pid()} | {'error', error_reason()}.
+                        serv:spawn_server_result() | {error, error_reason()}.
 
 start_link(Name, ConfigServ, ReadConfigCallback) ->
     ?spawn_server_opts(
@@ -45,7 +44,7 @@ start_link(Name, ConfigServ, ReadConfigCallback) ->
 
 %% Exported: toggle_logging
 
--spec toggle_logging(atom(), pid(), boolean()) -> 'ok'.
+-spec toggle_logging(atom(), pid(), boolean()) -> ok.
 
 toggle_logging(Name, Pid, Enabled) ->
     Name ! {toggle_logging, Pid, Enabled},
@@ -55,7 +54,7 @@ toggle_logging(Name, Pid, Enabled) ->
 
 -spec daemon_log(atom(), pid(), Module :: atom(), Tag :: atom() | [atom()],
                  Line :: integer(), Format :: string(), Args :: [any()]) ->
-                        'ok'.
+                        ok.
 
 daemon_log(Name, Pid, Module, Tag, Line, Format, Args) ->
     Name ! {daemon_log, Pid, Module, Tag, Line, Format, Args},
@@ -64,7 +63,7 @@ daemon_log(Name, Pid, Module, Tag, Line, Format, Args) ->
 %% Exported: dbg_log
 
 -spec dbg_log(atom(), pid(), Module :: atom(), Tag :: atom() | [atom()],
-              Line :: integer(), term()) -> 'ok'.
+              Line :: integer(), term()) -> ok.
 
 dbg_log(Name, Pid, Module, Tag, Line, Term) ->
     Name ! {dbg_log, Pid, Module, Tag, Line, Term},
@@ -188,7 +187,7 @@ message_handler(#state{parent = Parent,
     end.
 
 tty_available() ->
-    case init:get_argument('detached') of
+    case init:get_argument(detached) of
         {ok, [[]]} ->
             false;
         error ->
