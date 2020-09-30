@@ -443,6 +443,7 @@ validate(ConfigDir, [{Name, JsonType}|ConfigSchemaRest],
         validate_value(ConfigDir, JsonType, JsonValue, [Name|JsonPath]),
     [{Name, ValidatedValue}|
      validate(ConfigDir, ConfigSchemaRest, JsonTermRest, JsonPath)];
+
 validate(_ConfigDir, [{Name, JsonType}|_ConfigSchemaRest],
          [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath)
   when is_record(JsonType, json_type) ->
@@ -465,15 +466,11 @@ validate(ConfigDir, [{Name, NestedConfigSchema}|ConfigSchemaRest],
     [{Name, validate(ConfigDir, NestedConfigSchema, NestedJsonTerm,
                      [Name|JsonPath])}|
      validate(ConfigDir, ConfigSchemaRest, JsonTermRest, JsonPath)];
-% Too strict. Keep clause for future reference.
-%validate(_ConfigDir, [{Name, _NestedConfigSchema}|_ConfigSchemaRest],
-%         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], JsonPath) ->
-%    throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
-validate(ConfigDir, [_|ConfigSchemaRest],
-         [{AnotherName, NestedJsonTerm}|JsonTermRest], JsonPath) ->
-    validate(ConfigDir, ConfigSchemaRest,
-             [{AnotherName, NestedJsonTerm}|JsonTermRest], JsonPath);
-%% Array of objects
+%% Mismatch
+validate(_ConfigDir, [{Name, _NestedConfigSchema}|_ConfigSchemaRest],
+         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], JsonPath) ->
+    throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
+%% List
 validate(ConfigDir, [ConfigSchema|ConfigSchemaRest],
          [JsonTerm|JsonTermRest], JsonPath)
   when is_list(ConfigSchema), is_list(JsonTerm) ->
@@ -571,9 +568,10 @@ validate_value(_ConfigDir, #json_type{name = ipv6address,
 validate_value(_ConfigDir, #json_type{name = ipv6address}, Value, JsonPath) ->
     throw({not_ipv6_address, Value, JsonPath});
 %% base64
-validate_value(_ConfigDir, #json_type{name = base64}, Value, _JsonPath)
+validate_value(_ConfigDir, #json_type{name = base64,
+                                      convert = Convert}, Value, JsonPath)
   when is_binary(Value) ->
-    base64:decode(Value);
+    convert_value(Convert, base64:decode(Value), JsonPath);
 validate_value(_ConfigDir, #json_type{name = base64}, Value, JsonPath) ->
     throw({not_base64, Value, JsonPath});
 %% readable_file
@@ -675,7 +673,7 @@ validate_value(ConfigDir, #json_type{name = path, convert = Convert}, Value,
 validate_value(_ConfigDir, #json_type{name = path}, Value, JsonPath) ->
     throw({not_string, Value, JsonPath}).
 
-convert_value(undefined, Value, _JsonPath) ->
+convert_value(undefined, Value, JsonPath) ->
     Value;
 convert_value(Convert, Value, JsonPath) ->
     case catch Convert(Value) of

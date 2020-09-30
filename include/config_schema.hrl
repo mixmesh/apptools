@@ -3,11 +3,11 @@
 
 -record(json_type, {
           name              :: config_serv:type_name(),
-          info              :: binary() | 'undefined',
+          info              :: binary() | undefined,
           typical           :: config_serv:json_value(),
           convert           :: fun((config_serv:json_value()) ->
                                           config_serv:json_value()) |
-                               'undefined',
+                               undefined,
           reloadable = true :: boolean()
          }).
 
