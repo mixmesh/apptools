@@ -1,4 +1,4 @@
--module(unit_test_engine).
+-module(test_engine).
 -export([start/1]).
 
 -include_lib("apptools/include/shorthand.hrl").
@@ -18,7 +18,7 @@ start(BaseDir, [], Modules) ->
 start(BaseDir, [Target|Rest], Modules) ->
     case filelib:is_dir(Target) of
         true ->
-            Filename = filename:join([Target, "active_unit_tests.dat"]),
+            Filename = filename:join([Target, "active_tests.dat"]),
             case file:consult(Filename) of
                 {ok, ConsultedModules} ->
                     start(BaseDir, Rest,
@@ -30,7 +30,7 @@ start(BaseDir, [Target|Rest], Modules) ->
             end;
         false ->
             start(BaseDir, Rest,
-                  [?l2a("unit_test_" ++ Target), Modules])
+                  [?l2a("test_" ++ Target), Modules])
     end.
 
 return(Status) ->

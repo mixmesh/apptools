@@ -6,5 +6,5 @@
              config_serv,
              log_serv,
              serv,
-             unit_test_engine]},
+             test_engine]},
   {applications, [kernel, stdlib]}]}.
