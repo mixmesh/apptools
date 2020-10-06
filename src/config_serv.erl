@@ -673,7 +673,7 @@ validate_value(ConfigDir, #json_type{name = path, convert = Convert}, Value,
 validate_value(_ConfigDir, #json_type{name = path}, Value, JsonPath) ->
     throw({not_string, Value, JsonPath}).
 
-convert_value(undefined, Value, JsonPath) ->
+convert_value(undefined, Value, _JsonPath) ->
     Value;
 convert_value(Convert, Value, JsonPath) ->
     case catch Convert(Value) of
