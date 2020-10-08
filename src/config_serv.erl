@@ -136,12 +136,10 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
 -spec subscribe(pid()) -> ok.
 
 subscribe(Name) ->
-    Name ! {subscribe, self()},
-    ok.
+    serv:cast(Name,{subscribe, self()}).
 
 subscribe(Name, Pid) ->
-    Name ! {subscribe, Pid},
-    ok.
+    serv:cast(Name, {subscribe, Pid}).
 
 %% Exported: tcp_send
 
@@ -323,7 +321,7 @@ message_handler(#state{parent = Parent,
                 JsonTermOrValue ->
                     {reply, From, JsonTermOrValue}
             end;
-        {subscribe, ClientPid} ->
+        {cast, {subscribe, ClientPid}} ->
             case lists:member(ClientPid, Subscribers) of
                 true ->
                     noreply;

@@ -1,5 +1,6 @@
 -module(serv).
 -export([spawn_server/3, spawn_server/4]).
+-export([cast/2]).
 -export([call/2, call/3]).
 -export([reply/2]).
 -export([system_code_change/4,
@@ -127,9 +128,25 @@ loop(MessageHandler, State) ->
             throw({unknown_message, UnknownMessage})
     end.
 
+%% Exported: cast
+
+-spec cast(serv:name(), any()) -> ok.
+
+cast(To, Request) when is_pid(To) ->
+    To ! {cast, Request},
+    ok;
+cast(To, Request) ->
+    case whereis(To) of
+        undefined ->
+            throw(badarg);
+        Pid ->
+            Pid ! {cast, Request},
+            ok
+    end.
+
 %% Exported: call
 
--spec call(atom() | pid(), any(), integer() | infinity) ->
+-spec call(serv:name(), any(), integer() | infinity) ->
                   any() | {error, timeout}.
 
 call(To, Request) ->

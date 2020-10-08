@@ -47,8 +47,7 @@ start_link(Name, ConfigServ, ReadConfigCallback) ->
 -spec toggle_logging(atom(), pid(), boolean()) -> ok.
 
 toggle_logging(Name, Pid, Enabled) ->
-    Name ! {toggle_logging, Pid, Enabled},
-    ok.
+    serv:cast(Name, {toggle_logging, Pid, Enabled}).
 
 %% Exported: daemon_log
 
@@ -57,8 +56,7 @@ toggle_logging(Name, Pid, Enabled) ->
                         ok.
 
 daemon_log(Name, Pid, Module, Tag, Line, Format, Args) ->
-    Name ! {daemon_log, Pid, Module, Tag, Line, Format, Args},
-    ok.
+    serv:cast(Name, {daemon_log, Pid, Module, Tag, Line, Format, Args}).
 
 %% Exported: dbg_log
 
@@ -66,8 +64,7 @@ daemon_log(Name, Pid, Module, Tag, Line, Format, Args) ->
               Line :: integer(), term()) -> ok.
 
 dbg_log(Name, Pid, Module, Tag, Line, Term) ->
-    Name ! {dbg_log, Pid, Module, Tag, Line, Term},
-    ok.
+    serv:cast(Name, {dbg_log, Pid, Module, Tag, Line, Term}).
 
 %% Exported: format_error
 
@@ -131,16 +128,19 @@ message_handler(#state{parent = Parent,
                        error_log_info = _ErrorLogInfo,
                        disabled_processes = DisabledProcesses} = S) ->
     receive
-        {toggle_logging, Pid, true} ->
-            {noreply, S#state{disabled_processes = lists:delete(Pid, DisabledProcesses)}};
-        {toggle_logging, Pid, false} ->
+        {cast, {toggle_logging, Pid, true}} ->
+            {noreply, S#state{
+                        disabled_processes =
+                            lists:delete(Pid, DisabledProcesses)}};
+        {cast, {toggle_logging, Pid, false}} ->
             case lists:member(Pid, DisabledProcesses) of
                 true ->
                     noreply;
                 false ->
-                    {noreply, S#state{disabled_processes = [Pid|DisabledProcesses]}}
+                    {noreply, S#state{
+                                disabled_processes = [Pid|DisabledProcesses]}}
             end;
-        {daemon_log, Pid, Module, Tag, Line, Format, Args} ->
+        {cast, {daemon_log, Pid, Module, Tag, Line, Format, Args}} ->
             case lists:member(Pid, DisabledProcesses) of
                 false ->
                     write_to_daemon_log(
@@ -153,7 +153,7 @@ message_handler(#state{parent = Parent,
                 true ->
                     noreply
             end;
-        {dbg_log, Pid, Module, Tag, Line, Term} ->
+        {cast, {dbg_log, Pid, Module, Tag, Line, Term}} ->
             case lists:member(Pid, DisabledProcesses) of
                 false ->
                     write_to_dbg_log(
