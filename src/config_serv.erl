@@ -32,6 +32,7 @@
         {float, float(), float() | unbounded} |
         ipv4address |
         ipv4address_port |
+        hostname_port |
         ipv6address |
         base64 |
         readable_file |
@@ -41,10 +42,12 @@
         atom |
         string |
         path.
--type ip_address_port() :: {inet:ip4_address(), inet:port_number()}.
+-type ip4_address_port() :: {inet:ip4_address(), inet:port_number()}.
+-type hostname_port() :: {string(), inet:port_number()}.
 -type enum() :: atom().
 -type json_value() :: inet:ip4_address() |
-                      ip_address_port() |
+                      ip4_address_port() |
+                      hostname_port() |
                       enum() |
                       integer() |
                       boolean() |
@@ -77,9 +80,10 @@
         {float_out_of_range, json_value(), float(), float(),
          json_path()} |
         {not_float, json_value(), json_path()} |
-        {not_ipv4_address, json_value(), json_path()} |
-        {not_ipv4_address_port, json_value(), json_path()} |
-        {not_ipv6_address, json_value(), json_path()} |
+        {not_ipv4address, json_value(), json_path()} |
+        {not_ipv4address_port, json_value(), json_path()} |
+        {not_hostname_port, json_value(), json_path()} |
+        {not_ipv6address, json_value(), json_path()} |
         {not_base64, json_value(), json_path()} |
         {not_readable_file, string(), json_path()} |
         {not_writable_file, string(), json_path()} |
@@ -198,12 +202,16 @@ format_error({config, {not_float, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid float",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipv4_address, Value, JsonPath}}) ->
+format_error({config, {not_ipv4address, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipv4_address_port, Value, JsonPath}}) ->
+format_error({config, {not_ipv4address_port, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_hostname_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid hostname and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
 format_error({config, {not_ipv6_address, Value, JsonPath}}) ->
@@ -268,8 +276,10 @@ json_value_to_string(JsonValue) when is_atom(JsonValue) ->
     ?a2l(JsonValue);
 json_value_to_string(JsonValue) when is_binary(JsonValue) ->
     ?b2l(JsonValue);
-json_value_to_string({IpAddress, Port}) ->
-    [inet_parse:ntoa(IpAddress), ":", ?i2l(Port)].
+json_value_to_string({{_I1, _I2, _I3, _I4} = Ip4Address, Port}) ->
+    [inet_parse:ntoa(Ip4Address), ":", ?i2l(Port)];
+json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
+    [Hostname, ":", ?i2l(Port)].
 
 %%
 %% Server
@@ -542,17 +552,35 @@ validate_value(_ConfigDir, #json_type{name = ipv4address_port,
                             convert_value(Convert, {Ipv4Address, Port},
                                           JsonPath);
                         _ ->
-                            throw({not_ipv4_address_port, Value, JsonPath})
+                            throw({not_ipv4address_port, Value, JsonPath})
                     end;
                 {error, einval} ->
-                    throw({not_ipv4_address_port, Value, JsonPath})
+                    throw({not_ipv4address_port, Value, JsonPath})
             end;
         _ ->
             throw({not_ipv4_address_port, Value, JsonPath})
     end;
 validate_value(_ConfigDir, #json_type{name = ipv4address_port}, Value,
                JsonPath) ->
-    throw({not_ipv4_address_port, Value, JsonPath});
+    throw({not_ipv4address_port, Value, JsonPath});
+%% hostname_port
+validate_value(_ConfigDir, #json_type{name = hostname_port,
+                                      convert = Convert}, Value, JsonPath)
+  when is_binary(Value) ->
+    case string:tokens(?b2l(Value), ":") of
+        [Hostname, PortString] ->
+            case catch ?l2i(PortString) of
+                Port when is_integer(Port) ->
+                    convert_value(Convert, {Hostname, Port}, JsonPath);
+                _ ->
+                    throw({not_hostname_port, Value, JsonPath})
+            end;
+        _ ->
+            throw({not_hostname_port, Value, JsonPath})
+    end;
+validate_value(_ConfigDir, #json_type{name = hostname_port}, Value,
+               JsonPath) ->
+    throw({not_hostname_port, Value, JsonPath});
 %% ipv6address
 validate_value(_ConfigDir, #json_type{name = ipv6address,
                                       convert = Convert}, Value, JsonPath)
