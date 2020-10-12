@@ -30,6 +30,8 @@
         bool |
         {integer, integer(), integer() | unbounded} |
         {float, float(), float() | unbounded} |
+	ipaddress |
+	ipaddress_port |
         ipv4address |
         ipv4address_port |
         hostname_port |
@@ -43,10 +45,14 @@
         string |
         path.
 -type ip4_address_port() :: {inet:ip4_address(), inet:port_number()}.
+-type ip6_address_port() :: {inet:ip6_address(), inet:port_number()}.
+-type ip_address_port() :: {inet:ip_address(), inet:port_number()}.
 -type hostname_port() :: {string(), inet:port_number()}.
 -type enum() :: atom().
--type json_value() :: inet:ip4_address() |
-                      ip4_address_port() |
+-type json_value() :: inet:ip_address() |
+                      ip_address_port() |
+		      ip4_address_port() |
+		      ip6_address_port() |
                       hostname_port() |
                       enum() |
                       integer() |
@@ -80,10 +86,13 @@
         {float_out_of_range, json_value(), float(), float(),
          json_path()} |
         {not_float, json_value(), json_path()} |
+        {not_ipaddress, json_value(), json_path()} |
+	{not_ipaddress_port, json_value(), json_path()} |
         {not_ipv4address, json_value(), json_path()} |
         {not_ipv4address_port, json_value(), json_path()} |
         {not_hostname_port, json_value(), json_path()} |
         {not_ipv6address, json_value(), json_path()} |
+        {not_ipv6address_port, json_value(), json_path()} |
         {not_base64, json_value(), json_path()} |
         {not_readable_file, string(), json_path()} |
         {not_writable_file, string(), json_path()} |
@@ -202,6 +211,14 @@ format_error({config, {not_float, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid float",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
+format_error({config, {not_ipaddress, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipaddress_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip-address and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
 format_error({config, {not_ipv4address, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address",
                        [json_path_to_string(JsonPath),
@@ -216,6 +233,10 @@ format_error({config, {not_hostname_port, Value, JsonPath}}) ->
                         json_value_to_string(Value)]));
 format_error({config, {not_ipv6_address, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipv6address_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
 format_error({config, {not_base64, Value, JsonPath}}) ->
@@ -529,6 +550,61 @@ validate_value(_ConfigDir, #json_type{name = {float, From, To}}, Value,
 validate_value(_ConfigDir, #json_type{name = {float, _From, _To}}, Value,
                JsonPath) ->
     throw({not_float, Value, JsonPath});
+%% ipaddress
+validate_value(_ConfigDir, #json_type{name = ipaddress,
+                                      convert = Convert}, Value, JsonPath)
+  when is_binary(Value) ->
+    case inet:parse_address(?b2l(Value)) of
+        {ok, IpAddress} ->
+            convert_value(Convert, IpAddress, JsonPath);
+        {error, einval} ->
+            throw({not_ipaddress, Value, JsonPath})
+    end;
+
+%% ipaddress_port 1.2.3.4:80 or [10:11:12:13::abcd]:80 
+validate_value(_ConfigDir, #json_type{name = ipaddress_port,
+                                      convert = Convert}, Value, JsonPath)
+  when is_binary(Value) ->
+    case string:rchr(?b2l(Value), $:) of
+	0 ->
+	    throw({not_ipaddress_port, Value, JsonPath});
+	Pos ->
+	    %% [1:2:3:4]:80  Pos-1 = [1:2:3:4] Pos-3 = 1:2:3:4
+	    Size6 = Pos-3,
+	    case split_binary(Value, Pos-1) of
+		{<<$[,IpValue:Size6/binary,$]>>,<<$:,PortValue/binary>>} ->
+		    case inet:parse_ipv6_address(?b2l(IpValue)) of
+			{ok, Ipv6Address} ->
+			    case catch ?b2i(PortValue) of
+				Port when is_integer(Port) ->
+				    convert_value(Convert, {Ipv6Address, Port},
+						  JsonPath);
+				_ ->
+				    throw({not_ipaddress_port, Value, JsonPath})
+			    end;
+			{error, einval} ->
+			    throw({not_ipaddress_port, Value, JsonPath})
+		    end;
+		{IpValue,<<$:,PortValue/binary>>} ->
+		    case inet:parse_ipv4_address(?b2l(IpValue)) of
+			{ok, Ipv4Address} ->
+			    case catch ?b2i(PortValue) of
+				Port when is_integer(Port) ->
+				    convert_value(Convert, {Ipv4Address, Port},
+						  JsonPath);
+				_ ->
+				    throw({not_ipaddress_port, Value, JsonPath})
+			    end;
+			{error, einval} ->
+			    throw({not_ipaddress, Value, JsonPath})
+		    end;
+		_ ->
+		    throw({not_ipaddress_port, Value, JsonPath})
+	    end
+    end;
+validate_value(_ConfigDir, #json_type{name = ipaddress_port}, Value,
+               JsonPath) ->
+    throw({not_ipaddress_port, Value, JsonPath});
 %% ipv4address
 validate_value(_ConfigDir, #json_type{name = ipv4address,
                                       convert = Convert}, Value, JsonPath)
@@ -593,6 +669,30 @@ validate_value(_ConfigDir, #json_type{name = ipv6address,
     end;
 validate_value(_ConfigDir, #json_type{name = ipv6address}, Value, JsonPath) ->
     throw({not_ipv6_address, Value, JsonPath});
+%% ipv6address_port
+validate_value(_ConfigDir, #json_type{name = ipv6address_port,
+                                      convert = Convert}, Value, JsonPath)
+  when is_binary(Value) ->
+    case string:tokens(?b2l(Value), ":") of
+	[Ipv6AddressString, PortString] ->
+            case inet:parse_ipv6_address(Ipv6AddressString) of
+                {ok, Ipv6Address} ->
+                    case catch ?l2i(PortString) of
+                        Port when is_integer(Port) ->
+                            convert_value(Convert, {Ipv6Address, Port},
+                                          JsonPath);
+                        _ ->
+                            throw({not_ipv6address_port, Value, JsonPath})
+                    end;
+                {error, einval} ->
+                    throw({not_ipv6address_port, Value, JsonPath})
+            end;
+        _ ->
+            throw({not_ipv6_address_port, Value, JsonPath})
+    end;
+validate_value(_ConfigDir, #json_type{name = ipv6address_port}, Value,
+               JsonPath) ->
+    throw({not_ipv6address_port, Value, JsonPath});
 %% base64
 validate_value(_ConfigDir, #json_type{name = base64,
                                       convert = Convert}, Value, JsonPath)
@@ -723,3 +823,4 @@ validate_values(_ConfigDir, _JsonType, [], _JsonPath) ->
 validate_values(ConfigDir, JsonType, [JsonValue|Rest], JsonPath) ->
     [validate_value(ConfigDir, JsonType, JsonValue, JsonPath)|
      validate_values(ConfigDir, JsonType, Rest, JsonPath)].
+
