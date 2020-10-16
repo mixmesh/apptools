@@ -1,7 +1,7 @@
 %% -*- erlang -*-
 {application, apptools,
  [{description,"Application tools"},
-  {vsn, "1.0"},
+  {vsn, "0.9.1"},
   {modules, [config,
              config_serv,
              log_serv,
