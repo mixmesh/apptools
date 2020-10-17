@@ -392,6 +392,8 @@ message_handler(#state{parent = Parent,
 %% JSON lookup
 %%
 
+json_lookup(JsonTerm, []) ->
+    JsonTerm;
 json_lookup(JsonTerm, [Name]) when is_atom(Name), is_list(JsonTerm) ->
     case lists:keysearch(Name, 1, JsonTerm) of
         {value, {Name, NestedJsonTermOrValue}} ->
@@ -561,7 +563,7 @@ validate_value(_ConfigDir, #json_type{name = ipaddress,
             throw({not_ipaddress, Value, JsonPath})
     end;
 
-%% ipaddress_port 1.2.3.4:80 or [10:11:12:13::abcd]:80 
+%% ipaddress_port 1.2.3.4:80 or [10:11:12:13::abcd]:80
 validate_value(_ConfigDir, #json_type{name = ipaddress_port,
                                       convert = Convert}, Value, JsonPath)
   when is_binary(Value) ->
@@ -823,4 +825,3 @@ validate_values(_ConfigDir, _JsonType, [], _JsonPath) ->
 validate_values(ConfigDir, JsonType, [JsonValue|Rest], JsonPath) ->
     [validate_value(ConfigDir, JsonType, JsonValue, JsonPath)|
      validate_values(ConfigDir, JsonType, Rest, JsonPath)].
-
