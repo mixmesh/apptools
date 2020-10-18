@@ -18,11 +18,11 @@
 -define(MAX_SESSIONS, 8).
 
 -record(state, {
-	  parent           :: pid(),
-          tcp_serv         :: pid(),
-          config_filename  :: file:filename(),
-          config_schema    :: config_schema(),
-	  json_term        :: json_term(),
+	  parent :: pid(),
+          tcp_serv :: pid(),
+          config_filename :: file:filename(),
+          config_schema :: config_schema(),
+	  json_term :: json_term(),
           subscribers = [] :: [pid()]
          }).
 

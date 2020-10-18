@@ -12,16 +12,16 @@
 -include_lib("apptools/include/serv.hrl").
 
 -record(state, {
-          parent                  :: pid(),
-          tty_available           :: boolean(),
-          read_config_callback    :: read_config_callback(),
-          daemon_log_info         :: #daemon_log_info{},
-	  %% Falls back to term(), i.e. disk_log:log() type is not exported
-          daemon_disk_log         :: term(),
-          dbg_log_info            :: #dbg_log_info{},
-	  %% Falls back to term(), i.e. disk_log:log() type is not exported
-          dbg_disk_log            :: term(),
-          error_log_info          :: #error_log_info{},
+          parent :: pid(),
+          tty_available :: boolean(),
+          read_config_callback :: read_config_callback(),
+          daemon_log_info :: #daemon_log_info{},
+	  %% Fallback to any(), i.e. disk_log:log() type is not exported
+          daemon_disk_log :: any(),
+          dbg_log_info :: #dbg_log_info{},
+	  %% Fallback to any(), i.e. disk_log:log() type is not exported
+          dbg_disk_log :: any(),
+          error_log_info :: #error_log_info{},
           disabled_processes = [] :: [pid()]
          }).
 
