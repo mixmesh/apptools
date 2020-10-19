@@ -146,10 +146,10 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
 
 %% Exported: subscribe
 
--spec subscribe(pid()) -> ok.
+-spec subscribe(serv:name()) -> ok.
 
 subscribe(Name) ->
-    serv:cast(Name,{subscribe, self()}).
+    serv:cast(Name, {subscribe, self()}).
 
 subscribe(Name, Pid) ->
     serv:cast(Name, {subscribe, Pid}).
