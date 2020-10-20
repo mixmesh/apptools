@@ -43,7 +43,7 @@ try_load(Arg) ->
 	    end;
 	"" ->
 	    Module = list_to_atom(filename:basename(Filename)),
-	    code:puge(Module),
+	    code:purge(Module),
 	    {module,M} = code:load_file(Module),
 	    M
     end.
