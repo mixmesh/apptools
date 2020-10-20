@@ -239,7 +239,7 @@ write_to_daemon_log(Log, Tag, String) ->
     GregorianSeconds =
         calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
     disk_log:balog(Log,
-                   ["== ", ?a2l(Tag), " ", ?i2l(GregorianSeconds), " ",
+                   ["== (", ?a2l(Tag), ") ", ?i2l(GregorianSeconds), " ",
                     format_date(), $\n, String, $\n]).
 
 write_to_daemon_tty(false, _Tag, _String) ->
