@@ -1,7 +1,8 @@
 -module(log_serv).
--export([start_link/4]).
--export([daemon_log/7]).
--export([dbg_log/6]).
+-export([start_link/2]).
+-export([is_log_enabled/1]).
+-export([daemon_log/6]).
+-export([dbg_log/5]).
 -export([format_error/1]).
 -export_type([error_reason/0]).
 
@@ -13,7 +14,6 @@
         {parent :: pid(),
          tty_available :: boolean(),
          read_config :: read_config(),
-         config_updated :: config_updated(),
          daemon_log_info :: #daemon_log_info{},
          %% Fallback to any(), i.e. disk_log:log() type is not exported
          daemon_disk_log :: any(),
@@ -25,39 +25,43 @@
 
 -type read_config() ::
         fun(() -> {#daemon_log_info{}, #dbg_log_info{}, #error_log_info{}}).
--type config_updated() :: fun(() -> true).
 -type error_reason() :: already_started | term().
 
 %% Exported: start_link
 
--spec start_link(atom(), atom(), read_config(), config_updated()) ->
+-spec start_link(atom(), read_config()) ->
           serv:spawn_server_result() | {error, error_reason()}.
 
-start_link(Name, ConfigServ, ReadConfig, ConfigUpdated) ->
+start_link(ConfigServ, ReadConfig) ->
     ?spawn_server_opts(
        fun(Parent) ->
-               init(Parent, ConfigServ, ReadConfig, ConfigUpdated,
-                    tty_available())
+               init(Parent, ConfigServ, ReadConfig, tty_available())
        end,
        fun message_handler/1,
-       #serv_options{name = Name}).
+       #serv_options{name = ?MODULE}).
+
+%% Exported: is_log_enabled
+
+is_log_enabled(LogType) ->
+    [{LogType, Enabled}] = ets:lookup(?MODULE, LogType),
+    Enabled.
 
 %% Exported: daemon_log
 
--spec daemon_log(atom(), pid(), Module :: atom(), Tag :: atom() | [atom()],
+-spec daemon_log(pid(), Module :: atom(), Tag :: atom() | [atom()],
                  Line :: integer(), Format :: string(), Args :: [any()]) ->
                         ok.
 
-daemon_log(Name, Pid, Module, Tag, Line, Format, Args) ->
-    serv:cast(Name, {daemon_log, Pid, Module, Tag, Line, Format, Args}).
+daemon_log(Pid, Module, Tag, Line, Format, Args) ->
+    serv:cast(?MODULE, {daemon_log, Pid, Module, Tag, Line, Format, Args}).
 
 %% Exported: dbg_log
 
--spec dbg_log(atom(), pid(), Module :: atom(), Tag :: atom() | [atom()],
+-spec dbg_log(pid(), Module :: atom(), Tag :: atom() | [atom()],
               Line :: integer(), term()) -> ok.
 
-dbg_log(Name, Pid, Module, Tag, Line, Term) ->
-    serv:cast(Name, {dbg_log, Pid, Module, Tag, Line, Term}).
+dbg_log(Pid, Module, Tag, Line, Term) ->
+    serv:cast(?MODULE, {dbg_log, Pid, Module, Tag, Line, Term}).
 
 %% Exported: format_error
 
@@ -72,7 +76,7 @@ format_error(Reason) ->
 %% Server
 %%
 
-init(Parent, ConfigServ, ReadConfig, ConfigUpdated, TtyAvailable) ->
+init(Parent, ConfigServ, ReadConfig, TtyAvailable) ->
     {DaemonLogInfo, DbgLogInfo, ErrorLogInfo} = ReadConfig(),
     case open_log(DaemonLogInfo) of
         {ok, DaemonDiskLog} ->
@@ -95,11 +99,13 @@ init(Parent, ConfigServ, ReadConfig, ConfigUpdated, TtyAvailable) ->
                         _ ->
                             ok
                     end,
-                    ok = config_serv:subscribe(ConfigServ),
+                    ok = config_serv:subscribe(),
+                    ?MODULE = ets:new(?MODULE, [public, named_table]),
+                    true = save_enable_state(
+                             DaemonLogInfo, DbgLogInfo, ErrorLogInfo),
                     {ok, #state{parent = Parent,
                                 tty_available = TtyAvailable,
                                 read_config = ReadConfig,
-                                config_updated = ConfigUpdated,
                                 daemon_log_info = DaemonLogInfo,
                                 daemon_disk_log = DaemonDiskLog,
                                 dbg_log_info = DbgLogInfo,
@@ -115,7 +121,6 @@ init(Parent, ConfigServ, ReadConfig, ConfigUpdated, TtyAvailable) ->
 message_handler(#state{parent = Parent,
                        tty_available = TtyAvailable,
                        read_config = ReadConfig,
-                       config_updated = ConfigUpdated,
                        daemon_log_info = DaemonLogInfo,
                        daemon_disk_log = DaemonDiskLog,
                        dbg_log_info = DbgLogInfo,
@@ -147,7 +152,7 @@ message_handler(#state{parent = Parent,
                     noreply
             end;
         config_updated ->
-            {NewDaemonLogInfo, NewDbgLogInfo, _NewErrorLogInfo} =
+            {NewDaemonLogInfo, NewDbgLogInfo, NewErrorLogInfo} =
                 ReadConfig(),
             NewDaemonDiskLog =
                 reopen_log(TtyAvailable, NewDaemonLogInfo, DaemonDiskLog,
@@ -156,7 +161,8 @@ message_handler(#state{parent = Parent,
             NewDbgDiskLog =
                 reopen_log(TtyAvailable, NewDaemonLogInfo, DaemonDiskLog,
                            NewDbgLogInfo, DbgDiskLog, #dbg_log_info.file),
-            true = ConfigUpdated(),
+            true = save_enable_state(
+                     NewDaemonLogInfo, NewDbgLogInfo, NewErrorLogInfo),
             {noreply, S#state{daemon_log_info = NewDaemonLogInfo,
                               daemon_disk_log = NewDaemonDiskLog,
                               dbg_log_info = NewDbgLogInfo,
@@ -208,6 +214,13 @@ reopen_log(TtyAvailable, DaemonLogInfo, DaemonDiskLog, LogInfo, DiskLog,
 
 close_log(undefined) -> ok;
 close_log(Log) -> disk_log:close(Log).
+
+save_enable_state(#daemon_log_info{enabled = DaemonLogEnabled},
+                  #dbg_log_info{enabled = DbgLogEnabled},
+                  #error_log_info{enabled = ErrorLogEnabled}) ->
+    true = ets:insert(?MODULE, {daemon, DaemonLogEnabled}),
+    true = ets:insert(?MODULE, {dbg, DbgLogEnabled}),
+    ets:insert(?MODULE, {error, ErrorLogEnabled}).
 
 %%
 %% Daemon log
