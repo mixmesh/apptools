@@ -99,7 +99,7 @@ init(Parent, ConfigServ, ReadConfig, TtyAvailable) ->
                         _ ->
                             ok
                     end,
-                    ok = config_serv:subscribe(ConfigServ),
+                    ok = config_serv:subscribe(),
                     ?MODULE = ets:new(?MODULE, [public, named_table]),
                     true = save_enable_state(
                              DaemonLogInfo, DbgLogInfo, ErrorLogInfo),

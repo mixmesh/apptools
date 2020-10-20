@@ -138,6 +138,11 @@ cast(To, Request) when is_pid(To) ->
 cast(To, Request) ->
     case whereis(To) of
         undefined ->
+            io:format("BAD: ~p\n", [To]),
+
+
+
+
             throw(badarg);
         Pid ->
             Pid ! {cast, Request},

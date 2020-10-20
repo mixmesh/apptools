@@ -1,7 +1,7 @@
 -module(config_serv).
--export([start_link/5]).
+-export([start_link/4]).
 -export([lookup/2, lookup/3]).
--export([subscribe/1, subscribe/2]).
+-export([subscribe/0, subscribe/1]).
 -export([tcp_send/3]).
 -export([format_error/1]).
 -export_type([type_name/0, json_path/0, json_term/0, json_value/0,
@@ -105,23 +105,21 @@
 
 %% Exported: start_link
 
--spec start_link(Name :: atom(),
-                 ConfigFilename :: file:filename(),
+-spec start_link(ConfigFilename :: file:filename(),
                  ConfigSchema :: config_schema(),
                  ControlAddressPortPath :: json_path(),
                  Handler :: fun((gen_tcp:socket()) -> ok)) ->
                         serv:spawn_server_result() |
                         {config, config_error_reason()}.
 
-start_link(Name, ConfigFilename, ConfigSchema, ControlAddressPortPath,
-           Handler) ->
+start_link(ConfigFilename, ConfigSchema, ControlAddressPortPath, Handler) ->
     ?spawn_server_opts(
        fun(Parent) ->
                init(Parent, ConfigFilename, ConfigSchema,
                     ControlAddressPortPath, Handler)
        end,
        fun message_handler/1,
-       #serv_options{name = Name}).
+       #serv_options{name = ?MODULE}).
 
 %% Exported: lookup
 
@@ -145,13 +143,13 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
 
 %% Exported: subscribe
 
--spec subscribe(serv:name()) -> ok.
+-spec subscribe(pid()) -> ok.
 
-subscribe(Name) ->
-    serv:cast(Name, {subscribe, self()}).
+subscribe() ->
+    serv:cast(?MODULE, {subscribe, self()}).
 
-subscribe(Name, Pid) ->
-    serv:cast(Name, {subscribe, Pid}).
+subscribe(Pid) ->
+    serv:cast(?MODULE, {subscribe, Pid}).
 
 %% Exported: tcp_send
 

@@ -6,10 +6,10 @@
 -spec lookup(config_serv:json_term(), config_serv:json_value()) -> any().
 
 lookup(JsonPath) ->
-    config_serv:lookup(obscrete_config_serv, JsonPath).
+    config_serv:lookup(config_serv, JsonPath).
 
 lookup(JsonPath, DefaultValue) ->
-    config_serv:lookup(obscrete_config_serv, JsonPath, DefaultValue).
+    config_serv:lookup(config_serv, JsonPath, DefaultValue).
 
 %% Exported: lookup_children
 
