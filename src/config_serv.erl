@@ -9,7 +9,6 @@
 
 -include_lib("kernel/include/file.hrl").
 -include_lib("apptools/include/config_schema.hrl").
--include_lib("apptools/include/log.hrl").
 -include_lib("apptools/include/shorthand.hrl").
 -include_lib("apptools/include/serv.hrl").
 
@@ -274,7 +273,8 @@ format_error({config, {invalid_value, Value, JsonPath}}) ->
 format_error({config, {invalid_convert_value, JsonPath, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
 format_error(UnknownReason) ->
-    ?error_log(UnknownReason),
+    error_logger:error_report(
+      {?MODULE, ?LINE, {unknown_message, UnknownReason}}),
     <<"Internal error">>.
 
 json_path_to_string([Name|Rest]) ->
@@ -366,15 +366,11 @@ message_handler(#state{parent = Parent,
         reload ->
             case parse(ConfigFilename, ConfigSchema) of
                 {ok, NewJsonTerm} ->
-                    ?daemon_log("~s: Load succeeded", [ConfigFilename]),
                     lists:foreach(fun(ClientPid) ->
                                           ClientPid ! config_updated
                                   end, Subscribers),
                     {noreply, S#state{json_term = NewJsonTerm}};
-                {error, Reason} ->
-                    ?daemon_log("~s: Load failed: ~s",
-                                [ConfigFilename,
-                                 format_error({config, Reason})]),
+                {error, _Reason} ->
                     noreply
             end;
         {system, From, Request} ->
@@ -384,7 +380,8 @@ message_handler(#state{parent = Parent,
         {'EXIT', TcpServ, Reason} ->
             exit(Reason);
         UnknownMessage ->
-	    ?error_log({unknown_message, UnknownMessage}),
+            error_logger:error_report(
+              {?MODULE, ?LINE, {unknown_message, UnknownMessage}}),
             noreply
     end.
 

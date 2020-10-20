@@ -1,53 +1,46 @@
 -module(log_serv).
--export([start_link/3]).
--export([toggle_logging/3]).
+-export([start_link/4]).
 -export([daemon_log/7]).
 -export([dbg_log/6]).
 -export([format_error/1]).
 -export_type([error_reason/0]).
 
--include_lib("apptools/include/log.hrl").
--include_lib("apptools/include/log_serv.hrl").
--include_lib("apptools/include/shorthand.hrl").
--include_lib("apptools/include/serv.hrl").
+-include("../include/log_serv.hrl").
+-include("../include/shorthand.hrl").
+-include("../include/serv.hrl").
 
--record(state, {
-          parent :: pid(),
-          tty_available :: boolean(),
-          read_config_callback :: read_config_callback(),
-          daemon_log_info :: #daemon_log_info{},
-	  %% Fallback to any(), i.e. disk_log:log() type is not exported
-          daemon_disk_log :: any(),
-          dbg_log_info :: #dbg_log_info{},
-	  %% Fallback to any(), i.e. disk_log:log() type is not exported
-          dbg_disk_log :: any(),
-          error_log_info :: #error_log_info{},
-          disabled_processes = [] :: [pid()]
-         }).
+-record(state,
+        {parent :: pid(),
+         tty_available :: boolean(),
+         read_config :: read_config(),
+         config_updated :: config_updated(),
+         daemon_log_info :: #daemon_log_info{},
+         %% Fallback to any(), i.e. disk_log:log() type is not exported
+         daemon_disk_log :: any(),
+         dbg_log_info :: #dbg_log_info{},
+         %% Fallback to any(), i.e. disk_log:log() type is not exported
+         dbg_disk_log :: any(),
+         error_log_info :: #error_log_info{},
+         disabled_processes = [] :: [pid()]}).
 
--type read_config_callback() ::
+-type read_config() ::
         fun(() -> {#daemon_log_info{}, #dbg_log_info{}, #error_log_info{}}).
+-type config_updated() :: fun(() -> true).
 -type error_reason() :: already_started | term().
 
 %% Exported: start_link
 
--spec start_link(atom(), atom(), read_config_callback()) ->
-                        serv:spawn_server_result() | {error, error_reason()}.
+-spec start_link(atom(), atom(), read_config(), config_updated()) ->
+          serv:spawn_server_result() | {error, error_reason()}.
 
-start_link(Name, ConfigServ, ReadConfigCallback) ->
+start_link(Name, ConfigServ, ReadConfig, ConfigUpdated) ->
     ?spawn_server_opts(
        fun(Parent) ->
-               init(Parent, ConfigServ, ReadConfigCallback, tty_available())
+               init(Parent, ConfigServ, ReadConfig, ConfigUpdated,
+                    tty_available())
        end,
        fun message_handler/1,
        #serv_options{name = Name}).
-
-%% Exported: toggle_logging
-
--spec toggle_logging(atom(), pid(), boolean()) -> ok.
-
-toggle_logging(Name, Pid, Enabled) ->
-    serv:cast(Name, {toggle_logging, Pid, Enabled}).
 
 %% Exported: daemon_log
 
@@ -79,8 +72,8 @@ format_error(Reason) ->
 %% Server
 %%
 
-init(Parent, ConfigServ, ReadConfigCallback, TtyAvailable) ->
-    {DaemonLogInfo, DbgLogInfo, ErrorLogInfo} = ReadConfigCallback(),
+init(Parent, ConfigServ, ReadConfig, ConfigUpdated, TtyAvailable) ->
+    {DaemonLogInfo, DbgLogInfo, ErrorLogInfo} = ReadConfig(),
     case open_log(DaemonLogInfo) of
         {ok, DaemonDiskLog} ->
             case open_log(DbgLogInfo) of
@@ -105,7 +98,8 @@ init(Parent, ConfigServ, ReadConfigCallback, TtyAvailable) ->
                     ok = config_serv:subscribe(ConfigServ),
                     {ok, #state{parent = Parent,
                                 tty_available = TtyAvailable,
-                                read_config_callback = ReadConfigCallback,
+                                read_config = ReadConfig,
+                                config_updated = ConfigUpdated,
                                 daemon_log_info = DaemonLogInfo,
                                 daemon_disk_log = DaemonDiskLog,
                                 dbg_log_info = DbgLogInfo,
@@ -120,7 +114,8 @@ init(Parent, ConfigServ, ReadConfigCallback, TtyAvailable) ->
 
 message_handler(#state{parent = Parent,
                        tty_available = TtyAvailable,
-                       read_config_callback = ReadConfigCallback,
+                       read_config = ReadConfig,
+                       config_updated = ConfigUpdated,
                        daemon_log_info = DaemonLogInfo,
                        daemon_disk_log = DaemonDiskLog,
                        dbg_log_info = DbgLogInfo,
@@ -128,18 +123,6 @@ message_handler(#state{parent = Parent,
                        error_log_info = _ErrorLogInfo,
                        disabled_processes = DisabledProcesses} = S) ->
     receive
-        {cast, {toggle_logging, Pid, true}} ->
-            {noreply, S#state{
-                        disabled_processes =
-                            lists:delete(Pid, DisabledProcesses)}};
-        {cast, {toggle_logging, Pid, false}} ->
-            case lists:member(Pid, DisabledProcesses) of
-                true ->
-                    noreply;
-                false ->
-                    {noreply, S#state{
-                                disabled_processes = [Pid|DisabledProcesses]}}
-            end;
         {cast, {daemon_log, Pid, Module, Tag, Line, Format, Args}} ->
             case lists:member(Pid, DisabledProcesses) of
                 false ->
@@ -165,7 +148,7 @@ message_handler(#state{parent = Parent,
             end;
         config_updated ->
             {NewDaemonLogInfo, NewDbgLogInfo, _NewErrorLogInfo} =
-                ReadConfigCallback(),
+                ReadConfig(),
             NewDaemonDiskLog =
                 reopen_log(TtyAvailable, NewDaemonLogInfo, DaemonDiskLog,
                            NewDaemonLogInfo, DaemonDiskLog,
@@ -173,6 +156,7 @@ message_handler(#state{parent = Parent,
             NewDbgDiskLog =
                 reopen_log(TtyAvailable, NewDaemonLogInfo, DaemonDiskLog,
                            NewDbgLogInfo, DbgDiskLog, #dbg_log_info.file),
+            true = ConfigUpdated(),
             {noreply, S#state{daemon_log_info = NewDaemonLogInfo,
                               daemon_disk_log = NewDaemonDiskLog,
                               dbg_log_info = NewDbgLogInfo,
@@ -182,7 +166,8 @@ message_handler(#state{parent = Parent,
         {'EXIT', Parent, Reason} ->
             exit(Reason);
         UnknownMessage ->
-	    ?error_log({unknown_message, UnknownMessage}),
+            error_logger:error_report(
+              {?MODULE, ?LINE, {unknown_message, UnknownMessage}}),
             noreply
     end.
 
@@ -209,15 +194,15 @@ reopen_log(TtyAvailable, DaemonLogInfo, DaemonDiskLog, LogInfo, DiskLog,
            FileField) ->
     close_log(DiskLog),
     case open_log(LogInfo) of
-        {ok, DiskLog} when DiskLog /= undefined ->
+        {ok, NewDiskLog} when NewDiskLog /= undefined ->
             {true, Path} = element(FileField, LogInfo),
             write_to_daemon_log(TtyAvailable, DaemonLogInfo, DaemonDiskLog,
                                 self(), ?MODULE, tag, "~s: reopened", [Path]),
-            DiskLog;
+            NewDiskLog;
         {ok, undefined} ->
             undefined;
         {error, DiskLogReason} ->
-            ?error_log(DiskLogReason),
+            error_logger:error_report({?MODULE, ?LINE, DiskLogReason}),
             undefined
     end.
 
