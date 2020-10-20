@@ -223,10 +223,10 @@ write_to_daemon_log(true, #daemon_log_info{
   when Tty == true; FileEnabled == true ->
     case show(Module, Tag, ShowFilters, HideFilters) of
         true ->
-            String = io_lib:format("==== ~s ===\n" ++ Format,
+            String = io_lib:format("==== ~s ====\n" ++ Format,
                                    [format_date()|Args]),
-            write_to_daemon_log(DaemonDiskLog, String),
-            write_to_daemon_tty(Tty, String);
+            write_to_daemon_log(DaemonDiskLog, Tag, String),
+            write_to_daemon_tty(Tty, Tag, String);
         false ->
             skip
     end;
@@ -234,18 +234,18 @@ write_to_daemon_log(_TtyAvailable, _DaemonLogInfo, _DaemonDiskLog, _Pid,
                     _Module, _Tag, _Format, _Args) ->
     skip.
 
-write_to_daemon_log(undefined, _String) -> ok;
-write_to_daemon_log(Log, String) ->
+write_to_daemon_log(undefined, _Tag, _String) -> ok;
+write_to_daemon_log(Log, Tag, String) ->
     GregorianSeconds =
         calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
     disk_log:balog(Log,
-                   ["== ", ?i2l(GregorianSeconds), " ", format_date(), $\n,
-                    String, $\n]).
+                   ["== ", ?a2l(Tag), " ", ?i2l(GregorianSeconds), " ",
+                    format_date(), $\n, String, $\n]).
 
-write_to_daemon_tty(false, _String) ->
+write_to_daemon_tty(false, _Tag, _String) ->
     ok;
-write_to_daemon_tty(true, String) ->
-    io:format("~s", [["=DAEMON REPORT", String, $\n]]).
+write_to_daemon_tty(true, Tag, String) ->
+    io:format("~s", [["== DAEMON REPORT (", ?a2l(Tag), ") ", String, $\n]]).
 
 %%
 %% Debug log
@@ -302,7 +302,7 @@ write_to_dbg_log(Log, String) ->
 write_to_dbg_tty(false, _String) ->
     ok;
 write_to_dbg_tty(true, String) ->
-    io:format("~s", [["=DEBUG REPORT", String, $\n]]).
+    io:format("~s", [["== DEBUG REPORT ", String, $\n]]).
 
 %%
 %% Date formatting
