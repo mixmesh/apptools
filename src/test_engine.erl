@@ -1,7 +1,7 @@
 -module(test_engine).
 -export([start/1]).
 
--include_lib("apptools/include/shorthand.hrl").
+-include("../include/shorthand.hrl").
 
 %% Exported: test
 
