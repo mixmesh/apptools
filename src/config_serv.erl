@@ -8,9 +8,9 @@
               error_reason/0]).
 
 -include_lib("kernel/include/file.hrl").
--include_lib("apptools/include/config_schema.hrl").
--include_lib("apptools/include/shorthand.hrl").
--include_lib("apptools/include/serv.hrl").
+-include("../include/config_schema.hrl").
+-include("../include/shorthand.hrl").
+-include("../include/serv.hrl").
 
 -define(DEFAULT_CONTROL_ADDRESS, {127, 0, 0, 1}).
 -define(DEFAULT_CONTROL_PORT, 23313).

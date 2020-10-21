@@ -1,5 +1,5 @@
 -module(log_serv).
--export([start_link/2]).
+-export([start_link/1]).
 -export([is_log_enabled/1]).
 -export([daemon_log/6]).
 -export([dbg_log/5]).
@@ -29,14 +29,12 @@
 
 %% Exported: start_link
 
--spec start_link(atom(), read_config()) ->
+-spec start_link(read_config()) ->
           serv:spawn_server_result() | {error, error_reason()}.
 
-start_link(ConfigServ, ReadConfig) ->
+start_link(ReadConfig) ->
     ?spawn_server_opts(
-       fun(Parent) ->
-               init(Parent, ConfigServ, ReadConfig, tty_available())
-       end,
+       fun(Parent) -> init(Parent, ReadConfig, tty_available()) end,
        fun message_handler/1,
        #serv_options{name = ?MODULE}).
 
@@ -76,7 +74,7 @@ format_error(Reason) ->
 %% Server
 %%
 
-init(Parent, ConfigServ, ReadConfig, TtyAvailable) ->
+init(Parent, ReadConfig, TtyAvailable) ->
     {DaemonLogInfo, DbgLogInfo, ErrorLogInfo} = ReadConfig(),
     case open_log(DaemonLogInfo) of
         {ok, DaemonDiskLog} ->

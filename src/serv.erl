@@ -11,7 +11,7 @@
          write_debug/3]).
 -export_type([name/0, spawn_server_result/0]).
 
--include_lib("apptools/include/serv.hrl").
+-include("../include/serv.hrl").
 
 -type name() :: atom() | pid().
 -type spawn_server_result() :: {ok, pid()} | {error, any()}.
