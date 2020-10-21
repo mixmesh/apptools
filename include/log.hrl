@@ -26,7 +26,7 @@
 -define(dbg_log(_Term),
         case log_serv:is_log_enabled(dbg) of
             true ->
-                log_serv:dbg_log(self(), ?MODULE, tag, ?LINE, (_Term));
+                log_serv:dbg_log(self(), ?MODULE, debug, ?LINE, (_Term));
             false ->
                 silence
         end).
@@ -43,7 +43,7 @@
         case log_serv:is_log_enabled(dbg) of
             true ->
                 log_serv:dbg_log(
-                  self(), ?MODULE, tag, ?LINE,
+                  self(), ?MODULE, debug, ?LINE,
                   lists:flatten(io_lib:format((_Format), (_Args))));
             false ->
                 silence

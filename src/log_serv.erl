@@ -76,45 +76,79 @@ format_error(Reason) ->
 
 init(Parent, ReadConfig, TtyAvailable) ->
     {DaemonLogInfo, DbgLogInfo, ErrorLogInfo} = ReadConfig(),
+    open_log_1(DaemonLogInfo, DbgLogInfo, ErrorLogInfo,
+	       #state{parent = Parent,
+		      tty_available = TtyAvailable,
+		      read_config = ReadConfig}).
+
+open_log_1(DaemonLogInfo, DbgLogInfo, ErrorLogInfo, S) ->
+    %% io:format("CREATE DaemonLog ~p\n", [DaemonLogInfo]),
     case open_log(DaemonLogInfo) of
         {ok, DaemonDiskLog} ->
-            case open_log(DbgLogInfo) of
-                {ok, DbgDiskLog} ->
-                    case ErrorLogInfo of
-                        #error_log_info{enabled = true,
-                                        file = {true, Filename}} ->
-                            ok = error_logger:add_report_handler(
-                                   log_mf_h,
-                                   log_mf_h:init(?b2l(Filename),
-                                                 1024*1024*1024, 2,
-                                                 fun({error, _, _}) ->
-                                                         true;
-                                                    ({error_report, _, _}) ->
-                                                         true;
-                                                    (_) ->
-                                                         false
-                                                 end));
-                        _ ->
-                            ok
-                    end,
-                    ok = config_serv:subscribe(),
-                    ?MODULE = ets:new(?MODULE, [public, named_table]),
-                    true = save_enable_state(
-                             DaemonLogInfo, DbgLogInfo, ErrorLogInfo),
-                    {ok, #state{parent = Parent,
-                                tty_available = TtyAvailable,
-                                read_config = ReadConfig,
-                                daemon_log_info = DaemonLogInfo,
-                                daemon_disk_log = DaemonDiskLog,
-                                dbg_log_info = DbgLogInfo,
-                                dbg_disk_log = DbgDiskLog,
-                                error_log_info = ErrorLogInfo}};
-                {error, Reason} ->
-                    {error, Reason}
-            end;
-        {error, Reason} ->
+	    open_log_2(DbgLogInfo, ErrorLogInfo, 
+		       S#state {
+			 daemon_log_info = DaemonLogInfo,
+			 daemon_disk_log = DaemonDiskLog});
+	{error,Reason} ->
+	    io:format("failed to open DaemonDiskLog ~p\n", [Reason]),
             {error, Reason}
     end.
+
+open_log_2(DbgLogInfo, ErrorLogInfo, S) ->
+    %% io:format("CREATE DbgLog ~p\n", [DbgLogInfo]),
+    case open_log(DbgLogInfo) of
+        {ok, DbgDiskLog} ->
+	    open_log_3(ErrorLogInfo, 
+		       S#state {
+			 dbg_log_info = DbgLogInfo,
+			 dbg_disk_log = DbgDiskLog});
+	{error,Reason} ->
+	    io:format("failed to open DbgDiskLog ~p\n", [Reason]),
+            {error, Reason}
+    end.
+
+open_log_3(ErrorLogInfo, S) ->
+    %% io:format("CREATE ErrorLog ~p\n", [ErrorLogInfo]),
+    case ErrorLogInfo of
+	#error_log_info{enabled = true, file = {true, Filename}} ->
+	    case error_logger:add_report_handler(
+		   log_mf_h,
+		   log_mf_h:init(?b2l(Filename),
+				 1024*1024*1024, 2,
+				 fun({error, _, _}) ->
+					 true;
+				    ({error_report, _, _}) ->
+					 true;
+				    (_) ->
+					 false
+				 end)) of
+		ok ->
+		    open_log_final(S#state { error_log_info = ErrorLogInfo });
+
+		{error,Error} ->
+		    io:format("failed to add error handler ~p\n", [Error]),
+		    %% fail?
+		    {error, Error}
+	    end;
+	#error_log_info{enabled = true, file = {false,Filename}} ->
+	    io:format("ErrorLogInfo file ~s to open, not writeable\n", 
+		      [Filename]),
+	    open_log_final(S#state { error_log_info = ErrorLogInfo });
+	#error_log_info{enabled = false } ->
+	    io:format("ErrorLogInfo not enabled\n", []),
+	    open_log_final(S#state { error_log_info = ErrorLogInfo })
+    end.
+
+open_log_final(S) ->
+    %% io:format("CREATE LOG FINAL\n", []),
+    ok = config_serv:subscribe(),
+    ?MODULE = ets:new(?MODULE, [public, named_table]),
+    true = save_enable_state(
+	     S#state.daemon_log_info,
+	     S#state.dbg_log_info,
+	     S#state.error_log_info),
+    %% io:format("CREATE LOG OK\n", []),    
+    {ok, S}.
 
 message_handler(#state{parent = Parent,
                        tty_available = TtyAvailable,
@@ -275,7 +309,18 @@ write_to_dbg_log(true, #dbg_log_info{enabled = true,
                        "==== ~s ===\n~w: ~w: ~w\n~p",
                        [format_date(), Module, Tag, Line, Term]),
             write_to_dbg_log(DaemonDiskLog, String),
-            write_to_dbg_tty(Tty, String);
+
+	    TtyString =
+		try iolist_to_binary(Term) of
+		    Bin ->
+			io_lib:format(
+			  "==== ~s ===\n~w: ~w: ~w\n~s",
+			  [format_date(), Module, Tag, Line, Bin])
+		catch
+		    error:_ ->
+			String
+		end,
+            write_to_dbg_tty(Tty, TtyString);
         false ->
             skip
     end;
@@ -284,10 +329,11 @@ write_to_dbg_log(_TtyAvailable, _DbgLogInfo, _DbgDiskLog, _Module, _Tag, _Line,
     skip.
 
 show(Module, Tag, ShowFilters, HideFilters) ->
-    (is_member(Module, ShowFilters) orelse
-     is_member(Tag, ShowFilters)) andalso
-    (not(is_member(Module, HideFilters)) andalso
-     not(is_member(Tag, HideFilters))).
+    tags_member(Module,Tag,ShowFilters) andalso
+	not tags_member(Module,Tag,HideFilters).
+
+tags_member(Module,Tag,Filter) ->
+    is_member(Module, Filter) orelse is_member(Tag, Filter).
 
 is_member(_Tag, []) ->
     false;
