@@ -104,20 +104,21 @@
         {invalid_value, json_value(), json_path()} |
         {invalid_convert_value, json_path(), string()}.
 
+-type read_config() :: fun(() -> ip4_address_port()).
+
 %% Exported: start_link
 
 -spec start_link(ConfigFilename :: file:filename(),
                  AppSchemas :: [{atom(), schema()}],
-                 ControlAddressPortPath :: json_path(),
+                 ReadConfig :: read_config(),
                  Handler :: fun((gen_tcp:socket()) -> ok)) ->
                         serv:spawn_server_result() |
                         {config, config_error_reason()}.
 
-start_link(ConfigFilename, AppSchemas, ControlAddressPortPath, Handler) ->
+start_link(ConfigFilename, AppSchemas, ReadConfig, Handler) ->
     ?spawn_server_opts(
        fun(Parent) ->
-               init(Parent, ConfigFilename, AppSchemas,
-                    ControlAddressPortPath, Handler)
+               init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler)
        end,
        fun message_handler/1,
        #serv_options{name = ?MODULE}).
@@ -146,13 +147,13 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
 
 -spec lookup_in_application(atom(), json_path()) -> json_term().
 
-lookup_in_application(App, [Name|Rest] = JsonPath) ->
+lookup_in_application(App, [Name|_] = JsonPath) ->
     {ok, JsonTerm} = application:get_env(App, Name),
     json_lookup(JsonTerm, JsonPath).
 
 -spec lookup_in_application(atom(), json_path(), json_value()) -> json_term().
 
-lookup_in_application(App, [Name|Rest] = JsonPath, DefaultValue) ->
+lookup_in_application(App, [Name|_] = JsonPath, DefaultValue) ->
     {ok, JsonTerm} = application:get_env(App, Name),
     case json_lookup(JsonTerm, JsonPath) of
         not_found ->
@@ -323,10 +324,10 @@ json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
 %% Server
 %%
 
-init(Parent, ConfigFilename, AppSchemas, ControlListenPath, Handler) ->
+init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
     case parse_config_file(ConfigFilename, AppSchemas) of
         {ok, JsonTerm} ->
-            {IpAddress, Port} = json_lookup(JsonTerm, ControlListenPath),
+            {IpAddress, Port} = ReadConfig(),
             TcpServ =
                 proc_lib:spawn_link(
                   fun() ->

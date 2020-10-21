@@ -14,13 +14,13 @@
         {parent :: pid(),
          tty_available :: boolean(),
          read_config :: read_config(),
-         daemon_log_info :: #daemon_log_info{},
+         daemon_log_info :: #daemon_log_info{} | undefined,
          %% Fallback to any(), i.e. disk_log:log() type is not exported
          daemon_disk_log :: any(),
-         dbg_log_info :: #dbg_log_info{},
+         dbg_log_info :: #dbg_log_info{} | undefined,
          %% Fallback to any(), i.e. disk_log:log() type is not exported
          dbg_disk_log :: any(),
-         error_log_info :: #error_log_info{},
+         error_log_info :: #error_log_info{} | undefined,
          disabled_processes = [] :: [pid()]}).
 
 -type read_config() ::
@@ -85,7 +85,7 @@ open_log_1(DaemonLogInfo, DbgLogInfo, ErrorLogInfo, S) ->
     %% io:format("CREATE DaemonLog ~p\n", [DaemonLogInfo]),
     case open_log(DaemonLogInfo) of
         {ok, DaemonDiskLog} ->
-	    open_log_2(DbgLogInfo, ErrorLogInfo, 
+	    open_log_2(DbgLogInfo, ErrorLogInfo,
 		       S#state {
 			 daemon_log_info = DaemonLogInfo,
 			 daemon_disk_log = DaemonDiskLog});
@@ -98,7 +98,7 @@ open_log_2(DbgLogInfo, ErrorLogInfo, S) ->
     %% io:format("CREATE DbgLog ~p\n", [DbgLogInfo]),
     case open_log(DbgLogInfo) of
         {ok, DbgDiskLog} ->
-	    open_log_3(ErrorLogInfo, 
+	    open_log_3(ErrorLogInfo,
 		       S#state {
 			 dbg_log_info = DbgLogInfo,
 			 dbg_disk_log = DbgDiskLog});
@@ -131,7 +131,7 @@ open_log_3(ErrorLogInfo, S) ->
 		    {error, Error}
 	    end;
 	#error_log_info{enabled = true, file = {false,Filename}} ->
-	    io:format("ErrorLogInfo file ~s to open, not writeable\n", 
+	    io:format("ErrorLogInfo file ~s to open, not writeable\n",
 		      [Filename]),
 	    open_log_final(S#state { error_log_info = ErrorLogInfo });
 	#error_log_info{enabled = false } ->
@@ -147,7 +147,7 @@ open_log_final(S) ->
 	     S#state.daemon_log_info,
 	     S#state.dbg_log_info,
 	     S#state.error_log_info),
-    %% io:format("CREATE LOG OK\n", []),    
+    %% io:format("CREATE LOG OK\n", []),
     {ok, S}.
 
 message_handler(#state{parent = Parent,
