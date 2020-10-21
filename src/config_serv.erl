@@ -1,6 +1,7 @@
 -module(config_serv).
 -export([start_link/4]).
 -export([lookup/2, lookup/3]).
+-export([lookup_in_application/2, lookup_in_application/3]).
 -export([subscribe/0, subscribe/1]).
 -export([tcp_send/3]).
 -export([format_error/1]).
@@ -16,14 +17,13 @@
 -define(DEFAULT_CONTROL_PORT, 23313).
 -define(MAX_SESSIONS, 8).
 
--record(state, {
-	  parent :: pid(),
-          tcp_serv :: pid(),
-          config_filename :: file:filename(),
-          config_schema :: config_schema(),
-	  json_term :: json_term(),
-          subscribers = [] :: [pid()]
-         }).
+-record(state,
+        {parent :: pid(),
+         tcp_serv :: pid(),
+         config_filename :: file:filename(),
+         app_schemas :: [{atom(), schema()}],
+         json_term :: json_term(),
+         subscribers = [] :: [pid()]}).
 
 -type type_name() ::
         bool |
@@ -65,9 +65,9 @@
         [json_term()] |
         json_value().
 
--type config_schema() :: [{atom(), #json_type{}}] |
-                         [{atom(), config_schema()}] |
-                         [config_schema()].
+-type schema() :: [{atom(), #json_type{}}] |
+                  [{atom(), schema()}] |
+                  [schema()].
 -type json_name() :: atom() | {atom(), json_value()}.
 -type json_path() :: [json_name()].
 -type error_reason() ::
@@ -76,7 +76,9 @@
 -type config_error_reason() ::
         {bad_json, term()} |
         {file_error, file:filename(), file:posix()} |
-        {trailing, json_path()} |
+        {file_error, file:filename(), file:posix(), json_path()} |
+        {missing, json_name()} |
+        {unexpected, json_name()} |
         {expected, json_path(), json_path()} |
         {not_bool, json_value(), json_path()} |
         {integer_out_of_range, json_value(), integer(), integer(),
@@ -97,7 +99,6 @@
         {not_writable_file, string(), json_path()} |
         {not_readable_directory, string(), json_path()} |
         {not_writable_directory, string(), json_path()} |
-        {file_error, file:filename(), file:posix(), json_path()} |
         {not_atom, json_value(), json_path()} |
         {not_string, json_value(), json_path()} |
         {invalid_value, json_value(), json_path()} |
@@ -106,16 +107,16 @@
 %% Exported: start_link
 
 -spec start_link(ConfigFilename :: file:filename(),
-                 ConfigSchema :: config_schema(),
+                 AppSchemas :: [{atom(), schema()}],
                  ControlAddressPortPath :: json_path(),
                  Handler :: fun((gen_tcp:socket()) -> ok)) ->
                         serv:spawn_server_result() |
                         {config, config_error_reason()}.
 
-start_link(ConfigFilename, ConfigSchema, ControlAddressPortPath, Handler) ->
+start_link(ConfigFilename, AppSchemas, ControlAddressPortPath, Handler) ->
     ?spawn_server_opts(
        fun(Parent) ->
-               init(Parent, ConfigFilename, ConfigSchema,
+               init(Parent, ConfigFilename, AppSchemas,
                     ControlAddressPortPath, Handler)
        end,
        fun message_handler/1,
@@ -139,6 +140,25 @@ lookup(Name, JsonPath, DefaultJsonValue) ->
             throw({unknown_config_parameter, JsonPath});
         JsonTermOrValue ->
             JsonTermOrValue
+    end.
+
+%% Exported: lookup_in_application
+
+-spec lookup_in_application(atom(), json_path()) -> json_term().
+
+lookup_in_application(App, [Name|Rest] = JsonPath) ->
+    {ok, JsonTerm} = application:get_env(App, Name),
+    json_lookup(JsonTerm, JsonPath).
+
+-spec lookup_in_application(atom(), json_path(), json_value()) -> json_term().
+
+lookup_in_application(App, [Name|Rest] = JsonPath, DefaultValue) ->
+    {ok, JsonTerm} = application:get_env(App, Name),
+    case json_lookup(JsonTerm, JsonPath) of
+        not_found ->
+            DefaultValue;
+        Value ->
+            Value
     end.
 
 %% Exported: subscribe
@@ -179,9 +199,12 @@ format_error({config, {bad_json, Reason}}) ->
     ?l2b(io_lib:format("Bad JSON: ~p", [Reason]));
 format_error({config, {file_error, Filename, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]));
-format_error({config, {trailing, JsonPath}}) ->
-    ?l2b(io_lib:format("No configuration expected after ~s",
-                       [json_path_to_string(JsonPath)]));
+format_error({config, {file_error, Filename, Reason, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s: ~s",
+                       [json_path_to_string(JsonPath), Filename,
+                        file:format_error(Reason)]));
+format_error({config, {missing, Name}}) ->
+    ?l2b(io_lib:format("\"~s\" is missing", [Name]));
 format_error({config, {unexpected, Name}}) ->
     ?l2b(io_lib:format("\"~s\" was not expected", [Name]));
 format_error({config, {expected, ExpectedJsonPath, JsonPath}}) ->
@@ -252,10 +275,6 @@ format_error({config, {not_readable_directory, Dir, JsonPath}}) ->
 format_error({config, {not_writable_directory, Dir, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not writable",
                        [json_path_to_string(JsonPath), Dir]));
-format_error({config, {file_error, Filename, Reason, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s: ~s",
-                       [json_path_to_string(JsonPath), Filename,
-                        file:format_error(Reason)]));
 format_error({config, {not_atom, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid atom",
                        [json_path_to_string(JsonPath),
@@ -304,8 +323,8 @@ json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
 %% Server
 %%
 
-init(Parent, ConfigFilename, ConfigSchema, ControlListenPath, Handler) ->
-    case parse(ConfigFilename, ConfigSchema) of
+init(Parent, ConfigFilename, AppSchemas, ControlListenPath, Handler) ->
+    case parse_config_file(ConfigFilename, AppSchemas) of
         {ok, JsonTerm} ->
             {IpAddress, Port} = json_lookup(JsonTerm, ControlListenPath),
             TcpServ =
@@ -322,7 +341,7 @@ init(Parent, ConfigFilename, ConfigSchema, ControlListenPath, Handler) ->
             {ok, #state{parent = Parent,
                         tcp_serv = TcpServ,
                         config_filename = ConfigFilename,
-                        config_schema = ConfigSchema,
+                        app_schemas = AppSchemas,
                         json_term = JsonTerm}};
         {error, Reason} ->
             {error, {config, Reason}}
@@ -337,7 +356,7 @@ listener(ListenSocket, Handler) ->
 message_handler(#state{parent = Parent,
                        tcp_serv = TcpServ,
                        config_filename = ConfigFilename,
-                       config_schema = ConfigSchema,
+                       app_schemas = AppSchemas,
                        json_term = JsonTerm,
                        subscribers = Subscribers} = S) ->
     receive
@@ -362,7 +381,7 @@ message_handler(#state{parent = Parent,
             UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
             {noreply, S#state{subscribers = UpdatedSubscribers}};
         reload ->
-            case parse(ConfigFilename, ConfigSchema) of
+            case parse_config_file(ConfigFilename, AppSchemas) of
                 {ok, NewJsonTerm} ->
                     lists:foreach(fun(ClientPid) ->
                                           ClientPid ! config_updated
@@ -422,15 +441,18 @@ json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
 %% Parse config file
 %%
 
-parse(ConfigFilename, ConfigSchema) ->
+parse_config_file(ConfigFilename, AppSchemas) ->
     case file:read_file(ConfigFilename) of
         {ok, EncodedJson} ->
             case jsone:try_decode(EncodedJson, [{object_format, proplist}]) of
                 {ok, JsonTerm, _} ->
                     try
                         ConfigDir = filename:dirname(ConfigFilename),
-                        {ok, validate(ConfigDir, ConfigSchema,
-                                      atomify(JsonTerm), [])}
+                        AtomifiedJsonTerm = atomify(JsonTerm),
+                        CheckedJsonTerm =
+                            check_json_term(
+                              ConfigDir, AppSchemas, AtomifiedJsonTerm),
+                        {ok, CheckedJsonTerm}
                     catch
                         throw:Reason ->
                             {error, Reason}
@@ -453,56 +475,97 @@ atomify([JsonTerm|Rest]) when is_list(JsonTerm), is_list(Rest) ->
 atomify([JsonValue|Rest]) when is_list(Rest) ->
     [JsonValue|atomify(Rest)].
 
-validate(_ConfigDir, [], [], _JsonPath) ->
-    [];
-validate(_ConfigDir, [], [{Name, _JsonTerm}|_], _JsonPath) ->
+check_json_term(ConfigDir, AppSchemas, JsonTerm) ->
+    {App, FirstNameInJsonPath, Schema, RemainingAppSchemas} =
+        lookup_schema(AppSchemas, JsonTerm),
+    case validate(ConfigDir, Schema, JsonTerm) of
+        {ValidatedJsonTerm, []} when RemainingAppSchemas == [] ->
+            ValidatedJsonTerm;
+        {_ValidatedJsonTerm, []} ->
+            [{_App, [{Name, _JsonTerm}|_]}|_] = RemainingAppSchemas,
+            throw({missing, Name});
+        {ValidatedJsonTerm, RemainingJsonTerm} ->
+            ok = application:set_env(App, FirstNameInJsonPath, ValidatedJsonTerm,
+                                     [{persistent, true}]),
+            ValidatedJsonTerm ++
+                check_json_term(ConfigDir, RemainingAppSchemas, RemainingJsonTerm)
+    end.
+
+lookup_schema(AppSchemas, JsonTerm) ->
+    lookup_schema(AppSchemas, JsonTerm, []).
+
+lookup_schema([], [{Name, _JsonValue}|_], _MismatchedAppSchemas) ->
     throw({unexpected, Name});
-validate(_ConfigDir, [], _JsonTerm, JsonPath) ->
-    throw({trailing, JsonPath});
-validate(_ConfigDir, _ConfigSchema, [], _JsonPath) ->
-    [];
+lookup_schema([{App, [{Name, _JsonType}|_] = Schema}|Rest],
+              [{Name, _JsonValue}|_], MismatchedAppSchemas) ->
+    {App, Name, Schema, MismatchedAppSchemas ++ Rest};
+lookup_schema([{_App, [{_Name, _JsonType}|_]} = AppSchema|Rest],
+              [{_AnotherName, _JsonValue}|_] = JsonTerm,
+              MismatchedAppSchemas) ->
+    lookup_schema(Rest, JsonTerm, [AppSchema|MismatchedAppSchemas]).
+
+validate(ConfigDir, Schema, JsonTerm) ->
+    validate(ConfigDir, Schema, JsonTerm, [], []).
+
+validate(_ConfigDir, [], RemainingJsonTerm, _JsonPath, ValidatedJsonTerm) ->
+    {lists:reverse(ValidatedJsonTerm), RemainingJsonTerm};
 %% Single value
-validate(ConfigDir, [{Name, JsonType}|ConfigSchemaRest],
-         [{Name, JsonValue}|JsonTermRest], JsonPath)
+validate(ConfigDir,
+         [{Name, JsonType}|SchemaRest],
+         [{Name, JsonValue}|JsonTermRest], JsonPath,
+         ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     ValidatedValue =
         validate_value(ConfigDir, JsonType, JsonValue, [Name|JsonPath]),
-    [{Name, ValidatedValue}|
-     validate(ConfigDir, ConfigSchemaRest, JsonTermRest, JsonPath)];
-
-validate(_ConfigDir, [{Name, JsonType}|_ConfigSchemaRest],
-         [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath)
+    validate(ConfigDir, SchemaRest, JsonTermRest, JsonPath,
+             [{Name, ValidatedValue}|ValidatedJsonTerm]);
+validate(_ConfigDir,
+         [{Name, JsonType}|_SchemaRest],
+         [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath,
+         _ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
 %% Array of single values
-validate(ConfigDir, [{Name, [JsonType]}|ConfigSchemaRest],
-         [{Name, JsonValues}|JsonTermRest], JsonPath)
+validate(ConfigDir,
+         [{Name, [JsonType]}|SchemaRest],
+         [{Name, JsonValues}|JsonTermRest], JsonPath,
+         ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     ValidatedValues =
         validate_values(ConfigDir, JsonType, JsonValues, [Name|JsonPath]),
-    [{Name, ValidatedValues}|
-     validate(ConfigDir, ConfigSchemaRest, JsonTermRest, JsonPath)];
-validate(_ConfigDir, [{Name, [JsonType]}|_ConfigSchemaRest],
-         [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath)
+    validate(ConfigDir, SchemaRest, JsonTermRest, JsonPath,
+             [{Name, ValidatedValues}|ValidatedJsonTerm]);
+validate(_ConfigDir,
+         [{Name, [JsonType]}|_SchemaRest],
+         [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath,
+         _ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
 %% Object
-validate(ConfigDir, [{Name, NestedConfigSchema}|ConfigSchemaRest],
-         [{Name, NestedJsonTerm}|JsonTermRest], JsonPath) ->
-    [{Name, validate(ConfigDir, NestedConfigSchema, NestedJsonTerm,
-                     [Name|JsonPath])}|
-     validate(ConfigDir, ConfigSchemaRest, JsonTermRest, JsonPath)];
+validate(ConfigDir,
+         [{Name, NestedSchema}|SchemaRest],
+         [{Name, NestedJsonTerm}|JsonTermRest], JsonPath,
+         ValidatedJsonTerm) ->
+    {ValidatedNestedJsonTerm, []} =
+        validate(ConfigDir, NestedSchema, NestedJsonTerm, [Name|JsonPath], []),
+    validate(ConfigDir, SchemaRest, JsonTermRest, JsonPath,
+             [{Name, ValidatedNestedJsonTerm}|ValidatedJsonTerm]);
 %% Mismatch
-validate(_ConfigDir, [{Name, _NestedConfigSchema}|_ConfigSchemaRest],
-         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], JsonPath) ->
+validate(_ConfigDir,
+         [{Name, _NestedSchema}|_SchemaRest],
+         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], JsonPath,
+         _ValidatedJsonTerm) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
 %% List
-validate(ConfigDir, [ConfigSchema|ConfigSchemaRest],
-         [JsonTerm|JsonTermRest], JsonPath)
-  when is_list(ConfigSchema), is_list(JsonTerm) ->
-    [validate(ConfigDir, ConfigSchema, JsonTerm, JsonPath)|
-     validate(ConfigDir, [ConfigSchema|ConfigSchemaRest], JsonTermRest,
-              JsonPath)].
+validate(ConfigDir,
+         [Schema|SchemaRest],
+         [JsonTerm|JsonTermRest], JsonPath,
+         ValidatedJsonTerm)
+  when is_list(Schema), is_list(JsonTerm) ->
+    {ValidatedFirstJsonTerm, []} =
+        validate(ConfigDir, Schema, JsonTerm, JsonPath, []),
+    validate(ConfigDir, [Schema|SchemaRest], JsonTermRest, JsonPath,
+             ValidatedFirstJsonTerm ++ ValidatedJsonTerm).
 
 %% bool
 validate_value(_ConfigDir, #json_type{name = bool, convert = Convert}, Value,
