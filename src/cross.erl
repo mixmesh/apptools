@@ -15,11 +15,15 @@
 -export([calling_functions/1]).
 -export([calling_modules/1]).
 -export([calling_apps/1]).
+-export([application_dependencies/1]).
 
+-define(SETS, ordsets).
+-define(SET_T, ordsets:ordsets()).
 
 -define(VAR_EXPR, '$F_EXPR').
 -define(MOD_EXPR, '$M_EXPR').
-
+-define(MOD_UNKNOWN, '$M_UNKNOWN').
+-define(MOD_PRELOADED, '$M_PRELOADED').
 
 start(Ms=[_Arg|_]) when is_atom(_Arg) ->
     lists:foreach(
@@ -38,41 +42,69 @@ start(Ms=[_Arg|_]) when is_atom(_Arg) ->
 		end
 	end, Ms).
 
-%% external functions beeing called
-calling_functions(Info) ->
-    Calls = maps:get(external_call, Info, #{}),
-    maps:fold(
-      fun(_From, Called, Acc) ->
-	      ordsets:union(Called,Acc)
-      end, ordsets:new(), Calls).
-    
+application_dependencies(App) when is_atom(App) ->
+    Dir = code:lib_dir(App),
+    EBinDir = filename:join(Dir, "ebin"),
+    {ok,List} = file:list_dir(EBinDir),
+    lists:foldl(
+      fun(File, Acc) ->
+	      case filename:extension(File) of
+		  ".beam" ->
+		      {ok,Mod,Info} = load(filename:join(EBinDir, File)),
+		      io:format("module ~s loaded\n", [Mod]),
+		      Apps = calling_apps(Info),
+		      ?SETS:union(Apps, Acc);
+		  _ ->
+		      Acc
+	      end
+      end, ?SETS:new(), List).
+
+-spec calling_apps(Info::map()) -> ?SET_T.
+calling_apps(Info) ->
+    Modules = calling_modules(Info),
+    Apps = [module_app(M) || M <- ?SETS:to_list(Modules)],
+    ?SETS:from_list([A || A <- Apps, A =/= ?MOD_PRELOADED]).
+
 %% calculate modules beeing called
+-spec calling_modules(Info::map()) -> ?SET_T.
 calling_modules(Info) ->
     Calls = maps:get(external_call, Info, #{}),
     maps:fold(
       fun(_From, Called, Acc) ->
-	      Ms = ordsets:from_list([M||{M,_,_}<-ordsets:to_list(Called)]),
-	      ordsets:union(Ms,Acc)
-      end, ordsets:new(), Calls).
+	      Ms = ?SETS:from_list([M || {M,_,_} <- ?SETS:to_list(Called),
+					 M =/= ?MOD_EXPR]),
+	      ?SETS:union(Ms,Acc)
+      end, ?SETS:new(), Calls).
 
-calling_apps(Info) ->
-    Modules = calling_modules(Info),
-    ordsets:from_list([module_app(M) || M <- ordsets:to_list(Modules)]).
-
-module_app(?MOD_EXPR) -> ?MOD_EXPR;
+%% external functions beeing called
+-spec calling_functions(Info::map()) -> ?SET_T.
+calling_functions(Info) ->
+    Calls = maps:get(external_call, Info, #{}),
+    maps:fold(
+      fun(_From, Called, Acc) ->
+	      ?SETS:union(Called,Acc)
+      end, ?SETS:new(), Calls).
+    
+module_app(?MOD_EXPR) -> 
+    ?MOD_EXPR;
 module_app(Mod) ->
-    BeamFile = code:which(Mod),
-    case lists:reverse(filename:split(BeamFile)) of
-	[_Beam, "ebin", AppVsn | _] ->
-	    case string:split(AppVsn, "-") of
-		[App,_Vsn] -> list_to_atom(App);
-		[App] -> list_to_atom(App)
-	    end;
-	_ ->
-	    unknown
+    case code:which(Mod) of
+	preloaded ->
+	    ?MOD_PRELOADED;
+	BeamFile ->
+	    case lists:reverse(filename:split(BeamFile)) of
+		[_Beam, "ebin", AppVsn | _] ->
+		    case string:split(AppVsn, "-") of
+			[App,_Vsn] -> list_to_atom(App);
+			[App] -> list_to_atom(App)
+		    end;
+		_ ->
+		    io:format("warning: module ~s has no application (~s)\n", 
+			      [Mod, BeamFile]),
+		    ?MOD_UNKNOWN
+	    end
     end.
 	
-
 load(Filename) when is_list(Filename) ->
     case filename:extension(Filename) of
 	".beam" ->
@@ -99,7 +131,11 @@ load(Arg) when is_atom(Arg) ->
 	    end
     end.
 
-%% read abstract code from beam file
+%% read abstract code from beam file 
+%% HEAVILY borrowed/stolen from OTP. THANKS.
+
+
+-spec load_beam(File::atom()|string()) -> #{}.
 
 load_beam(File) ->
     load_beam(File,false).
