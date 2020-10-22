@@ -1,8 +1,7 @@
 -module(config_serv).
 -export([start_link/4]).
--export([lookup/2, lookup/3]).
--export([lookup_in_application/2, lookup_in_application/3]).
 -export([subscribe/0, subscribe/1]).
+-export([json_lookup/2]).
 -export([tcp_send/3]).
 -export([format_error/1]).
 -export_type([type_name/0, json_path/0, json_term/0, json_value/0,
@@ -122,45 +121,6 @@ start_link(ConfigFilename, AppSchemas, ReadConfig, Handler) ->
        end,
        fun message_handler/1,
        #serv_options{name = ?MODULE}).
-
-%% Exported: lookup
-
--spec lookup(serv:name(), json_path(), json_value()) -> json_term().
-
-lookup(Name, JsonPath) ->
-    case serv:call(Name, {lookup, JsonPath}, infinity) of
-        not_found ->
-            throw({unknown_config_parameter, JsonPath});
-        JsonTermOrValue ->
-            JsonTermOrValue
-    end.
-
-lookup(Name, JsonPath, DefaultJsonValue) ->
-    case serv:call(Name, {lookup, JsonPath, DefaultJsonValue}, infinity) of
-        not_found ->
-            throw({unknown_config_parameter, JsonPath});
-        JsonTermOrValue ->
-            JsonTermOrValue
-    end.
-
-%% Exported: lookup_in_application
-
--spec lookup_in_application(atom(), json_path()) -> json_term().
-
-lookup_in_application(App, [Name|_] = JsonPath) ->
-    {ok, JsonTerm} = application:get_env(App, Name),
-    json_lookup(JsonTerm, JsonPath).
-
--spec lookup_in_application(atom(), json_path(), json_value()) -> json_term().
-
-lookup_in_application(App, [Name|_] = JsonPath, DefaultValue) ->
-    {ok, JsonTerm} = application:get_env(App, Name),
-    case json_lookup(JsonTerm, JsonPath) of
-        not_found ->
-            DefaultValue;
-        Value ->
-            Value
-    end.
 
 %% Exported: subscribe
 
@@ -325,6 +285,7 @@ json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
 %%
 
 init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
+    ?MODULE = ets:new(?MODULE, [public, named_table]),
     case parse_config_file(ConfigFilename, AppSchemas) of
         {ok, JsonTerm} ->
             {IpAddress, Port} = ReadConfig(),
@@ -361,15 +322,6 @@ message_handler(#state{parent = Parent,
                        json_term = JsonTerm,
                        subscribers = Subscribers} = S) ->
     receive
-        {call, From, {lookup, JsonPath}} ->
-            {reply, From, json_lookup(JsonTerm, JsonPath)};
-        {call, From, {lookup, JsonPath, DefaultJsonValue}} ->
-            case json_lookup(JsonTerm, JsonPath) of
-                not_found ->
-                    {reply, From, DefaultJsonValue};
-                JsonTermOrValue ->
-                    {reply, From, JsonTermOrValue}
-            end;
         {cast, {subscribe, ClientPid}} ->
             case lists:member(ClientPid, Subscribers) of
                 true ->
@@ -403,9 +355,7 @@ message_handler(#state{parent = Parent,
             noreply
     end.
 
-%%
-%% JSON lookup
-%%
+%% Exported: json_lookup
 
 json_lookup(JsonTerm, []) ->
     JsonTerm;
@@ -481,15 +431,22 @@ check_json_term(ConfigDir, AppSchemas, JsonTerm) ->
         lookup_schema(AppSchemas, JsonTerm),
     case validate(ConfigDir, Schema, JsonTerm) of
         {ValidatedJsonTerm, []} when RemainingAppSchemas == [] ->
+            ok = application:set_env(
+                   App, FirstNameInJsonPath, ValidatedJsonTerm,
+                   [{persistent, true}]),
+            true = ets:insert(?MODULE, {FirstNameInJsonPath, App}),
             ValidatedJsonTerm;
         {_ValidatedJsonTerm, []} ->
             [{_App, [{Name, _JsonTerm}|_]}|_] = RemainingAppSchemas,
             throw({missing, Name});
         {ValidatedJsonTerm, RemainingJsonTerm} ->
-            ok = application:set_env(App, FirstNameInJsonPath, ValidatedJsonTerm,
-                                     [{persistent, true}]),
+            ok = application:set_env(
+                   App, FirstNameInJsonPath, ValidatedJsonTerm,
+                   [{persistent, true}]),
+            true = ets:insert(?MODULE, {FirstNameInJsonPath, App}),
             ValidatedJsonTerm ++
-                check_json_term(ConfigDir, RemainingAppSchemas, RemainingJsonTerm)
+                check_json_term(ConfigDir, RemainingAppSchemas,
+                                RemainingJsonTerm)
     end.
 
 lookup_schema(AppSchemas, JsonTerm) ->

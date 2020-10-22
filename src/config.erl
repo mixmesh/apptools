@@ -1,27 +1,27 @@
 -module(config).
--export([lookup/1, lookup/2, lookup/3, lookup_children/2]).
+-export([lookup/1, lookup/2, lookup_children/2]).
 
 %% Exported: lookup
 
 -spec lookup(config_serv:json_path()) -> config_serv:json_term().
 
-lookup(JsonPath) ->
-    config_serv:lookup(config_serv, JsonPath).
+lookup([Name|_] = JsonPath) ->
+    [{_, App}] = ets:lookup(config_serv, Name),
+    {ok, JsonTerm} = application:get_env(App, Name),
+    config_serv:json_lookup(JsonTerm, JsonPath).
 
--spec lookup(atom() | config_serv:json_path(),
-             config_serv:json_path() | config_serv:json_value()) ->
+-spec lookup(config_serv:json_path(), config_serv:json_value()) ->
           config_serv:json_term().
 
-lookup(App, JsonPath) when is_atom(App) ->
-    config_serv:lookup_in_application(App, JsonPath);
-lookup(JsonPath, DefaultValue) ->
-    config_serv:lookup(config_serv, JsonPath, DefaultValue).
-
--spec lookup(atom(), config_serv:json_path(), config_serv:json_value()) ->
-          config_serv:json_term().
-
-lookup(App, JsonPath, DefaultValue) ->
-    config_serv:lookup_in_application(App, JsonPath, DefaultValue).
+lookup([Name|_] = JsonPath, DefaultValue) ->
+    [{_, App}] = ets:lookup(config_serv, Name),
+    {ok, JsonTerm} = application:get_env(App, Name),
+    case config_serv:json_lookup(JsonTerm, JsonPath) of
+        not_found ->
+            DefaultValue;
+        Value ->
+            Value
+    end.
 
 %% Exported: lookup_children
 
