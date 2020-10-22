@@ -286,7 +286,7 @@ json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
 init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
     ?MODULE = ets:new(?MODULE, [public, named_table]),
     case load_config_file(ConfigFilename, AppSchemas) of
-        ok ->
+        true ->
             {IpAddress, Port} = ReadConfig(),
             TcpServ =
                 proc_lib:spawn_link(
@@ -317,7 +317,6 @@ message_handler(#state{parent = Parent,
                        tcp_serv = TcpServ,
                        config_filename = ConfigFilename,
                        app_schemas = AppSchemas,
-                       json_term = JsonTerm,
                        subscribers = Subscribers} = S) ->
     receive
         {cast, {subscribe, ClientPid}} ->
@@ -333,7 +332,7 @@ message_handler(#state{parent = Parent,
             {noreply, S#state{subscribers = UpdatedSubscribers}};
         reload ->
             case load_config_file(ConfigFilename, AppSchemas) of
-                ok ->
+                true ->
                     lists:foreach(fun(ClientPid) ->
                                           ClientPid ! config_updated
                                   end, Subscribers),
@@ -398,9 +397,8 @@ load_config_file(ConfigFilename, AppSchemas) ->
                     try
                         ConfigDir = filename:dirname(ConfigFilename),
                         AtomifiedJsonTerm = atomify(JsonTerm),
-                        true = load_json_term(
-                                 ConfigDir, AppSchemas, AtomifiedJsonTerm),
-                        {ok, CheckedJsonTerm}
+                        load_json_term(
+                          ConfigDir, AppSchemas, AtomifiedJsonTerm)
                     catch
                         throw:Reason ->
                             {error, Reason}
@@ -431,7 +429,7 @@ load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
             ok = application:set_env(
                    App, FirstNameInJsonPath, ValidatedJsonTerm,
                    [{persistent, true}]),
-            true = ets:insert(?MODULE, {FirstNameInJsonPath, App})
+            true = ets:insert(?MODULE, {FirstNameInJsonPath, App});
         {_ValidatedJsonTerm, []} ->
             [{_App, [{Name, _JsonTerm}|_]}|_] = RemainingAppSchemas,
             throw({missing, Name});
