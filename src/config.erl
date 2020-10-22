@@ -14,13 +14,17 @@ lookup([Name|_] = JsonPath) ->
           config_serv:json_term().
 
 lookup([Name|_] = JsonPath, DefaultValue) ->
-    [{_, App}] = ets:lookup(config_serv, Name),
-    {ok, JsonTerm} = application:get_env(App, Name),
-    case config_serv:json_lookup(JsonTerm, JsonPath) of
-        not_found ->
-            DefaultValue;
-        Value ->
-            Value
+    case ets:lookup(config_serv, Name) of
+        [{_, App}] ->
+            {ok, JsonTerm} = application:get_env(App, Name),
+            case config_serv:json_lookup(JsonTerm, JsonPath) of
+                not_found ->
+                    DefaultValue;
+                Value ->
+                    Value
+            end;
+        [] ->
+            DefaultValue
     end.
 
 %% Exported: lookup_children
