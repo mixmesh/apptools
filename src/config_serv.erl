@@ -21,7 +21,6 @@
          tcp_serv :: pid(),
          config_filename :: file:filename(),
          app_schemas :: [{atom(), schema()}],
-         json_term :: json_term(),
          subscribers = [] :: [pid()]}).
 
 -type type_name() ::
@@ -286,8 +285,8 @@ json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
 
 init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
     ?MODULE = ets:new(?MODULE, [public, named_table]),
-    case parse_config_file(ConfigFilename, AppSchemas) of
-        {ok, JsonTerm} ->
+    case load_config_file(ConfigFilename, AppSchemas) of
+        ok ->
             {IpAddress, Port} = ReadConfig(),
             TcpServ =
                 proc_lib:spawn_link(
@@ -303,8 +302,7 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
             {ok, #state{parent = Parent,
                         tcp_serv = TcpServ,
                         config_filename = ConfigFilename,
-                        app_schemas = AppSchemas,
-                        json_term = JsonTerm}};
+                        app_schemas = AppSchemas}};
         {error, Reason} ->
             {error, {config, Reason}}
     end.
@@ -334,12 +332,12 @@ message_handler(#state{parent = Parent,
             UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
             {noreply, S#state{subscribers = UpdatedSubscribers}};
         reload ->
-            case parse_config_file(ConfigFilename, AppSchemas) of
-                {ok, NewJsonTerm} ->
+            case load_config_file(ConfigFilename, AppSchemas) of
+                ok ->
                     lists:foreach(fun(ClientPid) ->
                                           ClientPid ! config_updated
                                   end, Subscribers),
-                    {noreply, S#state{json_term = NewJsonTerm}};
+                    {noreply, S};
                 {error, _Reason} ->
                     noreply
             end;
@@ -389,10 +387,10 @@ json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
     end.
 
 %%
-%% Parse config file
+%% Load config file
 %%
 
-parse_config_file(ConfigFilename, AppSchemas) ->
+load_config_file(ConfigFilename, AppSchemas) ->
     case file:read_file(ConfigFilename) of
         {ok, EncodedJson} ->
             case jsone:try_decode(EncodedJson, [{object_format, proplist}]) of
@@ -400,9 +398,8 @@ parse_config_file(ConfigFilename, AppSchemas) ->
                     try
                         ConfigDir = filename:dirname(ConfigFilename),
                         AtomifiedJsonTerm = atomify(JsonTerm),
-                        CheckedJsonTerm =
-                            check_json_term(
-                              ConfigDir, AppSchemas, AtomifiedJsonTerm),
+                        true = load_json_term(
+                                 ConfigDir, AppSchemas, AtomifiedJsonTerm),
                         {ok, CheckedJsonTerm}
                     catch
                         throw:Reason ->
@@ -426,7 +423,7 @@ atomify([JsonTerm|Rest]) when is_list(JsonTerm), is_list(Rest) ->
 atomify([JsonValue|Rest]) when is_list(Rest) ->
     [JsonValue|atomify(Rest)].
 
-check_json_term(ConfigDir, AppSchemas, JsonTerm) ->
+load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
     {App, FirstNameInJsonPath, Schema, RemainingAppSchemas} =
         lookup_schema(AppSchemas, JsonTerm),
     case validate(ConfigDir, Schema, JsonTerm) of
@@ -434,8 +431,7 @@ check_json_term(ConfigDir, AppSchemas, JsonTerm) ->
             ok = application:set_env(
                    App, FirstNameInJsonPath, ValidatedJsonTerm,
                    [{persistent, true}]),
-            true = ets:insert(?MODULE, {FirstNameInJsonPath, App}),
-            ValidatedJsonTerm;
+            true = ets:insert(?MODULE, {FirstNameInJsonPath, App})
         {_ValidatedJsonTerm, []} ->
             [{_App, [{Name, _JsonTerm}|_]}|_] = RemainingAppSchemas,
             throw({missing, Name});
@@ -444,9 +440,8 @@ check_json_term(ConfigDir, AppSchemas, JsonTerm) ->
                    App, FirstNameInJsonPath, ValidatedJsonTerm,
                    [{persistent, true}]),
             true = ets:insert(?MODULE, {FirstNameInJsonPath, App}),
-            ValidatedJsonTerm ++
-                check_json_term(ConfigDir, RemainingAppSchemas,
-                                RemainingJsonTerm)
+            load_json_term(ConfigDir, RemainingAppSchemas,
+                           RemainingJsonTerm)
     end.
 
 lookup_schema(AppSchemas, JsonTerm) ->
