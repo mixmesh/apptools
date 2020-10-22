@@ -331,10 +331,10 @@ message_handler(#state{parent = Parent,
             UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
             {noreply, S#state{subscribers = UpdatedSubscribers}};
         reload ->
+	    %% Ensure that reload is called in all applications
+	    EnvBefore = application_controller:prep_config_change(),
             case load_config_file(ConfigFilename, AppSchemas) of
                 true ->
-                    %% Ensure that reload is called in all applications
-                    EnvBefore = application_controller:prep_config_change(),
                     ok = application_controller:config_change(EnvBefore),
                     %% Inform all subscribers
                     lists:foreach(fun(ClientPid) ->
