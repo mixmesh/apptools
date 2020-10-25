@@ -20,13 +20,12 @@ foreach_worker(Do, Workers, [{Id, Pid}|Rest]) ->
 
 %% Exported: get_selected_worker_pids
 
-get_selected_worker_pids([], NeighbourWorkers) ->
+get_selected_worker_pids([], _NeighbourWorkers) ->
     [];
 get_selected_worker_pids([Id|Rest], NeighbourWorkers) ->
     case lists:keytake(Id, 1, NeighbourWorkers) of
         {value, {Id, Pid}, RemainingNeighbourWorkers} ->
-            [Pid|get_selected_worker_pids(
-                   Rest, lists:delete(Id, NeighbourWorkers))];
+            [Pid|get_selected_worker_pids(Rest, RemainingNeighbourWorkers)];
         false ->
             [undefined|get_selected_worker_pids(Rest, NeighbourWorkers)]
     end.
