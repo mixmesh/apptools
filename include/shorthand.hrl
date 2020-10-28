@@ -14,9 +14,9 @@
 -define(t2l, tuple_to_list).
 -define(t2b, term_to_binary).
 -define(b2t, binary_to_term).
--define(a2b(Atom), ?l2b(?a2l(Atom))).
--define(i2b(Atom), ?l2b(?i2l(Atom))).
--define(b2a(Bin), ?l2a(?b2l(Bin))).
+-define(a2b, atom_to_binary).
+-define(i2b, integer_to_binary).
+-define(b2a, binary_to_atom).
 -define(b2i, binary_to_integer).
 -define(b2f, binary_to_float).
 -define(iof(Format, Args), io:format(Format, Args)).

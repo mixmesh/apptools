@@ -1,9 +1,11 @@
 -module(config_serv).
 -export([start_link/4]).
 -export([subscribe/0, subscribe/1]).
--export([json_lookup/2]).
+-export([json_lookup/2, json_path_to_string/1]).
 -export([tcp_send/3]).
+-export([atomify/1, lookup_schema/2, validate/4]).
 -export([format_error/1]).
+
 -export_type([type_name/0, json_path/0, json_term/0, json_value/0,
               error_reason/0]).
 
@@ -131,128 +133,40 @@ subscribe() ->
 subscribe(Pid) ->
     serv:cast(?MODULE, {subscribe, Pid}).
 
-%% Exported: tcp_send
+%% Exported: json_lookup
 
--spec tcp_send(inet:ip_address(), inet:port_number(), Message :: binary()) ->
-                      ok | {error, {posix, inet:posix()}}.
-
-tcp_send(Address, Port, Message) ->
-    case gen_tcp:connect(Address, Port,
-                         [{packet, 2}, {nodelay, true}, binary]) of
-        {ok, Socket} ->
-            gen_tcp:send(Socket, Message),
-            gen_tcp:close(Socket);
-        {error, Reason} ->
-            {error, {posix, Reason}}
+json_lookup(JsonTerm, []) ->
+    JsonTerm;
+json_lookup(JsonTerm, [Name]) when is_atom(Name), is_list(JsonTerm) ->
+    case lists:keysearch(Name, 1, JsonTerm) of
+        {value, {Name, NestedJsonTermOrValue}} ->
+            NestedJsonTermOrValue;
+        false ->
+            not_found
+    end;
+%% Note: For now a key can only be the last item in the path. This
+%% restriction will be lifted when needed.
+json_lookup(JsonTerm, [{KeyName, Value}]) when is_list(JsonTerm) ->
+    json_lookup_instance(JsonTerm, {KeyName, Value});
+json_lookup(JsonTerm, [Name|Rest]) when is_atom(Name), is_list(JsonTerm) ->
+    case lists:keysearch(Name, 1, JsonTerm) of
+        {value, {Name, NestedJsonTerm}} ->
+            json_lookup(NestedJsonTerm, Rest);
+        false ->
+            not_found
     end.
 
-%% Exported: format_error
+json_lookup_instance([], {_KeyName, _Value}) ->
+    not_found;
+json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
+    case lists:member({KeyName, Value}, JsonTermInstance)of
+        true ->
+            JsonTermInstance;
+        false ->
+            json_lookup_instance(Rest, {KeyName, Value})
+    end.
 
--spec format_error(error_reason()) -> binary().
-
-format_error(already_started) ->
-    <<"Already started">>;
-format_error({posix, Reason}) ->
-    ?l2b(inet:format_error(Reason));
-format_error({config, {bad_json, Reason}}) ->
-%%    <<"Syntax error">>;
-    ?l2b(io_lib:format("Bad JSON: ~p", [Reason]));
-format_error({config, {file_error, Filename, Reason}}) ->
-    ?l2b(io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]));
-format_error({config, {file_error, Filename, Reason, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s: ~s",
-                       [json_path_to_string(JsonPath), Filename,
-                        file:format_error(Reason)]));
-format_error({config, {missing, Name}}) ->
-    ?l2b(io_lib:format("\"~s\" is missing", [Name]));
-format_error({config, {unexpected, Name}}) ->
-    ?l2b(io_lib:format("\"~s\" was not expected", [Name]));
-format_error({config, {expected, ExpectedJsonPath, JsonPath}}) ->
-    ?l2b(io_lib:format("Expected \"~s\", got \"~s\"",
-                       [json_path_to_string(ExpectedJsonPath),
-                        json_path_to_string(JsonPath)]));
-format_error({config, {not_bool, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid boolean value",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {integer_out_of_range, Value, From, To, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s must be in the range between ~w and ~w",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value), From, To]));
-format_error({config, {not_integer, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid integer",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {float_out_of_range, Value, From, To, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s must be in the range between ~w and ~w",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value), From, To]));
-format_error({config, {not_float, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid float",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_ipaddress, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ip-address",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_ipaddress_port, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ip-address and port",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_ipv4address, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_ipv4address_port, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address and port",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_hostname_port, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid hostname and port",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_ipv6_address, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_ipv6address_port, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address and port",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_base64, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid base64 value",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_readable_file, Dir, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not readable",
-                       [json_path_to_string(JsonPath), Dir]));
-format_error({config, {not_writable_file, Dir, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not writable",
-                       [json_path_to_string(JsonPath), Dir]));
-format_error({config, {not_readable_directory, Dir, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is readable",
-                       [json_path_to_string(JsonPath), Dir]));
-format_error({config, {not_writable_directory, Dir, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not writable",
-                       [json_path_to_string(JsonPath), Dir]));
-format_error({config, {not_atom, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid atom",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {not_string, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid string",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {invalid_value, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid value",
-                       [json_path_to_string(JsonPath),
-                        json_value_to_string(Value)]));
-format_error({config, {invalid_convert_value, JsonPath, Reason}}) ->
-    ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
-format_error(UnknownReason) ->
-    error_logger:error_report(
-      {?MODULE, ?LINE, {unknown_message, UnknownReason}}),
-    <<"Internal error">>.
+%% Exported: json_path_to_string
 
 json_path_to_string([Name|Rest]) ->
     json_path_to_string(Rest, [?a2l(Name)]).
@@ -278,6 +192,21 @@ json_value_to_string({{_I1, _I2, _I3, _I4} = Ip4Address, Port}) ->
     [inet_parse:ntoa(Ip4Address), ":", ?i2l(Port)];
 json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
     [Hostname, ":", ?i2l(Port)].
+
+%% Exported: tcp_send
+
+-spec tcp_send(inet:ip_address(), inet:port_number(), Message :: binary()) ->
+                      ok | {error, {posix, inet:posix()}}.
+
+tcp_send(Address, Port, Message) ->
+    case gen_tcp:connect(Address, Port,
+                         [{packet, 2}, {nodelay, true}, binary]) of
+        {ok, Socket} ->
+            gen_tcp:send(Socket, Message),
+            gen_tcp:close(Socket);
+        {error, Reason} ->
+            {error, {posix, Reason}}
+    end.
 
 %%
 %% Server
@@ -356,39 +285,6 @@ message_handler(#state{parent = Parent,
             noreply
     end.
 
-%% Exported: json_lookup
-
-json_lookup(JsonTerm, []) ->
-    JsonTerm;
-json_lookup(JsonTerm, [Name]) when is_atom(Name), is_list(JsonTerm) ->
-    case lists:keysearch(Name, 1, JsonTerm) of
-        {value, {Name, NestedJsonTermOrValue}} ->
-            NestedJsonTermOrValue;
-        false ->
-            not_found
-    end;
-%% Note: For now a key can only be the last item in the path. This
-%% restriction will be lifted when needed.
-json_lookup(JsonTerm, [{KeyName, Value}]) when is_list(JsonTerm) ->
-    json_lookup_instance(JsonTerm, {KeyName, Value});
-json_lookup(JsonTerm, [Name|Rest]) when is_atom(Name), is_list(JsonTerm) ->
-    case lists:keysearch(Name, 1, JsonTerm) of
-        {value, {Name, NestedJsonTerm}} ->
-            json_lookup(NestedJsonTerm, Rest);
-        false ->
-            not_found
-    end.
-
-json_lookup_instance([], {_KeyName, _Value}) ->
-    not_found;
-json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
-    case lists:member({KeyName, Value}, JsonTermInstance)of
-        true ->
-            JsonTermInstance;
-        false ->
-            json_lookup_instance(Rest, {KeyName, Value})
-    end.
-
 %%
 %% Load config file
 %%
@@ -414,6 +310,8 @@ load_config_file(ConfigFilename, AppSchemas) ->
             {error, {file_error, ConfigFilename, Reason}}
     end.
 
+%% Exported: atomify
+
 atomify([]) ->
     [];
 atomify([{Binary, JsonTerm}|Rest]) when is_list(JsonTerm), is_list(Rest) ->
@@ -428,7 +326,7 @@ atomify([JsonValue|Rest]) when is_list(Rest) ->
 load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
     {App, FirstNameInJsonPath, Schema, RemainingAppSchemas} =
         lookup_schema(AppSchemas, JsonTerm),
-    case validate(ConfigDir, Schema, JsonTerm) of
+    case validate(ConfigDir, Schema, JsonTerm, false) of
         {ValidatedJsonTerm, []} when RemainingAppSchemas == [] ->
             ok = application:set_env(
                    App, FirstNameInJsonPath, ValidatedJsonTerm,
@@ -446,6 +344,8 @@ load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
                            RemainingJsonTerm)
     end.
 
+%% Exported: validate
+
 lookup_schema(AppSchemas, JsonTerm) ->
     lookup_schema(AppSchemas, JsonTerm, []).
 
@@ -459,67 +359,111 @@ lookup_schema([{_App, [{_Name, _JsonType}|_]} = AppSchema|Rest],
               MismatchedAppSchemas) ->
     lookup_schema(Rest, JsonTerm, [AppSchema|MismatchedAppSchemas]).
 
-validate(ConfigDir, Schema, JsonTerm) ->
-    validate(ConfigDir, Schema, JsonTerm, [], []).
+%% Exported: validate
 
-validate(_ConfigDir, [], RemainingJsonTerm, _JsonPath, ValidatedJsonTerm) ->
+validate(ConfigDir, Schema, JsonTerm, Lazy) ->
+    validate(ConfigDir, Schema, JsonTerm, Lazy, [], []).
+
+validate(_ConfigDir, _Schema, [], true, _JsonPath,
+         ValidatedJsonTerm) ->
+    {lists:reverse(ValidatedJsonTerm), []};
+validate(_ConfigDir, [], RemainingJsonTerm, _Lazy, _JsonPath,
+         ValidatedJsonTerm) ->
     {lists:reverse(ValidatedJsonTerm), RemainingJsonTerm};
 %% Single value
 validate(ConfigDir,
          [{Name, JsonType}|SchemaRest],
-         [{Name, JsonValue}|JsonTermRest], JsonPath,
+         [{Name, JsonValue}|JsonTermRest], Lazy, JsonPath,
          ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     ValidatedValue =
         validate_value(ConfigDir, JsonType, JsonValue, [Name|JsonPath]),
-    validate(ConfigDir, SchemaRest, JsonTermRest, JsonPath,
+    validate(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
              [{Name, ValidatedValue}|ValidatedJsonTerm]);
 validate(_ConfigDir,
          [{Name, JsonType}|_SchemaRest],
-         [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath,
+         [{AnotherName, _JsonValue}|_JsonTermRest], false, JsonPath,
          _ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
+validate(ConfigDir,
+         [{_Name, JsonType}|SchemaRest],
+         [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+         ValidatedJsonTerm)
+  when is_record(JsonType, json_type) ->
+    validate(ConfigDir,
+             SchemaRest,
+             [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+             ValidatedJsonTerm);
 %% Array of single values
 validate(ConfigDir,
          [{Name, [JsonType]}|SchemaRest],
-         [{Name, JsonValues}|JsonTermRest], JsonPath,
+         [{Name, JsonValues}|JsonTermRest], Lazy, JsonPath,
          ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     ValidatedValues =
         validate_values(ConfigDir, JsonType, JsonValues, [Name|JsonPath]),
-    validate(ConfigDir, SchemaRest, JsonTermRest, JsonPath,
+    validate(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
              [{Name, ValidatedValues}|ValidatedJsonTerm]);
 validate(_ConfigDir,
          [{Name, [JsonType]}|_SchemaRest],
-         [{AnotherName, _JsonValue}|_JsonTermRest], JsonPath,
+         [{AnotherName, _JsonValue}|_JsonTermRest], false, JsonPath,
          _ValidatedJsonTerm)
   when is_record(JsonType, json_type) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
+validate(ConfigDir,
+         [{_Name, [JsonType]}|SchemaRest],
+         [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+         ValidatedJsonTerm)
+  when is_record(JsonType, json_type) ->
+    validate(ConfigDir,
+             SchemaRest,
+             [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+             ValidatedJsonTerm);
 %% Object
 validate(ConfigDir,
          [{Name, NestedSchema}|SchemaRest],
-         [{Name, NestedJsonTerm}|JsonTermRest], JsonPath,
+         [{Name, NestedJsonTerm}|JsonTermRest], Lazy, JsonPath,
          ValidatedJsonTerm) ->
-    {ValidatedNestedJsonTerm, []} =
-        validate(ConfigDir, NestedSchema, NestedJsonTerm, [Name|JsonPath], []),
-    validate(ConfigDir, SchemaRest, JsonTermRest, JsonPath,
+    case Lazy of
+        false ->
+            {ValidatedNestedJsonTerm, []} =
+                validate(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []);
+        true ->
+            {ValidatedNestedJsonTerm, RemainingJsonTerm} =
+                validate(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []),
+            case RemainingJsonTerm of
+                [] ->
+                    ok;
+                [{AnotherName, _}|_] ->
+                    throw({unexpected, AnotherName})
+            end
+    end,
+    validate(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
              [{Name, ValidatedNestedJsonTerm}|ValidatedJsonTerm]);
 %% Mismatch
 validate(_ConfigDir,
          [{Name, _NestedSchema}|_SchemaRest],
-         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], JsonPath,
+         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], false, JsonPath,
          _ValidatedJsonTerm) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
+validate(ConfigDir,
+         [{_Name, _NestedSchema}|SchemaRest],
+         [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
+         ValidatedJsonTerm) ->
+    validate(ConfigDir,
+             SchemaRest,
+             [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
+             ValidatedJsonTerm);
 %% List
 validate(ConfigDir,
          [Schema|SchemaRest],
-         [JsonTerm|JsonTermRest], JsonPath,
+         [JsonTerm|JsonTermRest], Lazy, JsonPath,
          ValidatedJsonTerm)
   when is_list(Schema), is_list(JsonTerm) ->
     {ValidatedFirstJsonTerm, []} =
-        validate(ConfigDir, Schema, JsonTerm, JsonPath, []),
-    validate(ConfigDir, [Schema|SchemaRest], JsonTermRest, JsonPath,
+        validate(ConfigDir, Schema, JsonTerm, Lazy, JsonPath, []),
+    validate(ConfigDir, [Schema|SchemaRest], JsonTermRest, Lazy, JsonPath,
              ValidatedFirstJsonTerm ++ ValidatedJsonTerm).
 
 %% bool
@@ -838,3 +782,111 @@ validate_values(_ConfigDir, _JsonType, [], _JsonPath) ->
 validate_values(ConfigDir, JsonType, [JsonValue|Rest], JsonPath) ->
     [validate_value(ConfigDir, JsonType, JsonValue, JsonPath)|
      validate_values(ConfigDir, JsonType, Rest, JsonPath)].
+
+%% Exported: format_error
+
+-spec format_error(error_reason()) -> binary().
+
+format_error(already_started) ->
+    <<"Already started">>;
+format_error({posix, Reason}) ->
+    ?l2b(inet:format_error(Reason));
+format_error({config, {bad_json, Reason}}) ->
+%%    <<"Syntax error">>;
+    ?l2b(io_lib:format("Bad JSON: ~p", [Reason]));
+format_error({config, {file_error, Filename, Reason}}) ->
+    ?l2b(io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]));
+format_error({config, {file_error, Filename, Reason, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s: ~s",
+                       [json_path_to_string(JsonPath), Filename,
+                        file:format_error(Reason)]));
+format_error({config, {missing, Name}}) ->
+    ?l2b(io_lib:format("\"~s\" is missing", [Name]));
+format_error({config, {unexpected, Name}}) ->
+    ?l2b(io_lib:format("\"~s\" was not expected", [Name]));
+format_error({config, {expected, ExpectedJsonPath, JsonPath}}) ->
+    ?l2b(io_lib:format("Expected \"~s\", got \"~s\"",
+                       [json_path_to_string(ExpectedJsonPath),
+                        json_path_to_string(JsonPath)]));
+format_error({config, {not_bool, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid boolean value",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {integer_out_of_range, Value, From, To, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s must be in the range between ~w and ~w",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value), From, To]));
+format_error({config, {not_integer, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid integer",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {float_out_of_range, Value, From, To, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s must be in the range between ~w and ~w",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value), From, To]));
+format_error({config, {not_float, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid float",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipaddress, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipaddress_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip-address and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipv4address, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipv4address_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_hostname_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid hostname and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipv6_address, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ipv6address_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address and port",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_base64, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid base64 value",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_readable_file, Dir, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not readable",
+                       [json_path_to_string(JsonPath), Dir]));
+format_error({config, {not_writable_file, Dir, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not writable",
+                       [json_path_to_string(JsonPath), Dir]));
+format_error({config, {not_readable_directory, Dir, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is readable",
+                       [json_path_to_string(JsonPath), Dir]));
+format_error({config, {not_writable_directory, Dir, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not writable",
+                       [json_path_to_string(JsonPath), Dir]));
+format_error({config, {not_atom, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid atom",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_string, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid string",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {invalid_value, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid value",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {invalid_convert_value, JsonPath, Reason}}) ->
+    ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
+format_error(UnknownReason) ->
+    error_logger:error_report(
+      {?MODULE, ?LINE, {unknown_message, UnknownReason}}),
+    <<"Internal error">>.
