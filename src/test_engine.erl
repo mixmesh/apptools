@@ -40,7 +40,9 @@ run(_BaseDir, []) ->
     done;
 run(BaseDir, [Module|Rest]) ->
     try
-        io:format("******** Module: ~s\n", [Module]),
+        io:format("************************************************************************\n"),
+        io:format("**** Module: ~s\n", [Module]),
+        io:format("************************************************************************\n"),
         apply(Module, start, []),
         io:format("++++ SUCCESS!\n\n"),
         run(BaseDir, Rest)

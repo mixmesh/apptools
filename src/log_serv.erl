@@ -82,7 +82,6 @@ init(Parent, ReadConfig, TtyAvailable) ->
 		      read_config = ReadConfig}).
 
 open_log_1(DaemonLogInfo, DbgLogInfo, ErrorLogInfo, S) ->
-    %% io:format("CREATE DaemonLog ~p\n", [DaemonLogInfo]),
     case open_log(DaemonLogInfo) of
         {ok, DaemonDiskLog} ->
 	    open_log_2(DbgLogInfo, ErrorLogInfo,
@@ -90,12 +89,10 @@ open_log_1(DaemonLogInfo, DbgLogInfo, ErrorLogInfo, S) ->
 			 daemon_log_info = DaemonLogInfo,
 			 daemon_disk_log = DaemonDiskLog});
 	{error,Reason} ->
-	    io:format("failed to open DaemonDiskLog ~p\n", [Reason]),
             {error, Reason}
     end.
 
 open_log_2(DbgLogInfo, ErrorLogInfo, S) ->
-    %% io:format("CREATE DbgLog ~p\n", [DbgLogInfo]),
     case open_log(DbgLogInfo) of
         {ok, DbgDiskLog} ->
 	    open_log_3(ErrorLogInfo,
@@ -103,12 +100,10 @@ open_log_2(DbgLogInfo, ErrorLogInfo, S) ->
 			 dbg_log_info = DbgLogInfo,
 			 dbg_disk_log = DbgDiskLog});
 	{error,Reason} ->
-	    io:format("failed to open DbgDiskLog ~p\n", [Reason]),
             {error, Reason}
     end.
 
 open_log_3(ErrorLogInfo, S) ->
-    %% io:format("CREATE ErrorLog ~p\n", [ErrorLogInfo]),
     case ErrorLogInfo of
 	#error_log_info{enabled = true, file = {true, Filename}} ->
 	    case error_logger:add_report_handler(
@@ -126,28 +121,27 @@ open_log_3(ErrorLogInfo, S) ->
 		    open_log_final(S#state { error_log_info = ErrorLogInfo });
 
 		{error,Error} ->
-		    io:format("failed to add error handler ~p\n", [Error]),
-		    %% fail?
+		    %% FIXME: fail?
 		    {error, Error}
 	    end;
 	#error_log_info{enabled = true, file = {false,Filename}} ->
-	    io:format("ErrorLogInfo file ~s to open, not writeable\n",
-		      [Filename]),
-	    open_log_final(S#state { error_log_info = ErrorLogInfo });
+	    open_log_final(S#state{error_log_info = ErrorLogInfo});
 	#error_log_info{enabled = false } ->
-	    io:format("ErrorLogInfo not enabled\n", []),
 	    open_log_final(S#state { error_log_info = ErrorLogInfo })
     end.
 
 open_log_final(S) ->
-    %% io:format("CREATE LOG FINAL\n", []),
-    ok = config_serv:subscribe(),
+    case whereis(config_server) of
+        undefined ->
+            skip;
+        _ ->
+            ok = config_serv:subscribe()
+    end,
     ?MODULE = ets:new(?MODULE, [public, named_table]),
     true = save_enable_state(
 	     S#state.daemon_log_info,
 	     S#state.dbg_log_info,
 	     S#state.error_log_info),
-    %% io:format("CREATE LOG OK\n", []),
     {ok, S}.
 
 message_handler(#state{parent = Parent,
