@@ -124,7 +124,7 @@ open_log_3(ErrorLogInfo, S) ->
 		    %% FIXME: fail?
 		    {error, Error}
 	    end;
-	#error_log_info{enabled = true, file = {false,Filename}} ->
+	#error_log_info{enabled = true, file = {false, _Filename}} ->
 	    open_log_final(S#state{error_log_info = ErrorLogInfo});
 	#error_log_info{enabled = false } ->
 	    open_log_final(S#state { error_log_info = ErrorLogInfo })
