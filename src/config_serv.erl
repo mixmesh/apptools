@@ -344,7 +344,7 @@ load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
                            RemainingJsonTerm)
     end.
 
-%% Exported: validate
+%% Exported: lookup_schema
 
 lookup_schema(AppSchemas, JsonTerm) ->
     lookup_schema(AppSchemas, JsonTerm, []).
