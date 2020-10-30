@@ -5,16 +5,16 @@
           enabled :: boolean(),
           tty :: boolean(),
           file :: {Enabled :: boolean(), Filename :: binary()},
-          show_filters :: [binary()],
-          hide_filters :: [binary()]
+          show_filters :: [atom()],
+          hide_filters :: [atom()]
         }).
 
 -record(dbg_log_info, {
           enabled :: boolean(),
           tty :: boolean(),
           file :: {Enabled :: boolean(), Filename :: binary()},
-          show_filters :: [binary()],
-          hide_filters :: [binary()]
+          show_filters :: [atom()],
+          hide_filters :: [atom()]
          }).
 
 -record(error_log_info, {
