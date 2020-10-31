@@ -20,7 +20,9 @@
 
 %% Exported: spawn_server
 
--spec spawn_server(atom(), any(), fun(), #serv_options{}) ->
+-spec spawn_server(
+        atom(), any(), {Module :: atom(), FunctionName :: atom()} | function(),
+        #serv_options{}) ->
           spawn_server_result().
 
 spawn_server(ModuleName, InitState, MessageHandler) ->
