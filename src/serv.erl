@@ -9,6 +9,8 @@
          system_replace_state/2,
          system_terminate/4,
          write_debug/3]).
+-export([loop/2, init/5]).
+
 -export_type([name/0, spawn_server_result/0]).
 
 -include("../include/serv.hrl").
@@ -19,35 +21,53 @@
 %% Exported: spawn_server
 
 -spec spawn_server(atom(), any(), fun(), #serv_options{}) ->
-                          spawn_server_result().
+          spawn_server_result().
 
 spawn_server(ModuleName, InitState, MessageHandler) ->
     spawn_server(ModuleName, InitState, MessageHandler,
                  #serv_options{module_name = ModuleName}).
 
 spawn_server(ModuleName, InitState, MessageHandler,
-             #serv_options{timeout = Timeout, link = Link} = Options) ->
-    Parent = self(),
-    PerformInit =
-        fun() ->
-                true = put_options(Options, ModuleName, Parent, MessageHandler),
-                init(InitState, MessageHandler, Options, Parent)
-        end,
-    Pid =
-        if
-            Link ->
-                proc_lib:spawn_link(PerformInit);
-            true ->
-                proc_lib:spawn(PerformInit)
-        end,
-    receive
-        {Pid, ok} ->
-            {ok, Pid};
-        {Pid, {error, Reason}} ->
-            {error, Reason}
-    after
-        Timeout ->
-            {error, timeout}
+             #serv_options{timeout = Timeout, link = true} = Options) ->
+    proc_lib:start_link(
+      ?MODULE, init, [ModuleName, InitState, MessageHandler, Options, self()],
+      Timeout);
+spawn_server(ModuleName, InitState, MessageHandler,
+             #serv_options{timeout = Timeout, link = false} = Options) ->
+    proc_lib:start(
+      ?MODULE, init, [ModuleName, InitState, MessageHandler, Options, self()],
+      Timeout).
+
+init(ModuleName, InitState, MessageHandler,
+     #serv_options{name = Name, trap_exit = TrapExit} = Options, Parent) ->
+    true = put_options(Options, ModuleName, Parent, MessageHandler),
+    true = register_server(Name),
+    case TrapExit of
+        true ->
+            process_flag(trap_exit, true);
+        false ->
+            ignore
+    end,
+    case InitState of
+        {M, F, A} ->
+            case apply(M, F, [Parent|A]) of
+                {ok, State} ->
+                    proc_lib:init_ack(Parent, {ok, self()}),
+                    loop(MessageHandler, State);
+                {error, Reason} ->
+                    exit(Reason)
+            end;
+        Fun when is_function(Fun) ->
+            case InitState(Parent) of
+                {ok, State} ->
+                    proc_lib:init_ack(Parent, {ok, self()}),
+                    loop(MessageHandler, State);
+                {error, Reason} ->
+                    exit(Reason)
+            end;
+        _ ->
+            proc_lib:init_ack(Parent, {ok, self()}),
+            loop(MessageHandler, InitState)
     end.
 
 put_options(Options, ModuleName, Parent, MessageHandler) ->
@@ -59,45 +79,25 @@ put_options(Options, ModuleName, Parent, MessageHandler) ->
 get_options() ->
     get(serv_options).
 
-init(InitState, MessageHandler,
-     #serv_options{name = Name, trap_exit = TrapExit}, Parent) ->
-    case register_server(Name) of
-        true ->
-            if
-                TrapExit ->
-                    process_flag(trap_exit, true);
-                true ->
-                    ignore
-            end,
-            if
-                is_function(InitState) ->
-                    case InitState(Parent) of
-                        {ok, State} ->
-                            Parent ! {self(), ok},
-                            loop(MessageHandler, State);
-                        {error, Reason} ->
-                            Parent ! {self(), {error, Reason}}
-                    end;
-                true ->
-                    Parent ! {self(), ok},
-                    loop(MessageHandler, InitState)
-            end;
-        {error, Reason} ->
-            Parent ! {self(), {error, Reason}}
-    end.
-
 register_server(none) ->
     true;
 register_server(Name) ->
     case is_pid(whereis(Name)) of
         true ->
-            {error, already_started};
+            exit(already_started);
         false ->
             register(Name, self())
     end.
 
 loop(MessageHandler, State) ->
-    case MessageHandler(State) of
+    ReturnValue =
+        case MessageHandler of
+            {M, F} ->
+                M:F(State);
+            MessageHandler when is_function(MessageHandler) ->
+                MessageHandler(State)
+        end,
+    case ReturnValue of
         stop ->
             stopped;
         {stop, {Pid, Ref}, Reply} ->
@@ -200,11 +200,11 @@ system_continue(Parent, DebugOptions, State) ->
     case get_options() of
         #serv_options{message_handler = MessageHandler,
                       system_continue = not_set} ->
-            loop(MessageHandler, State);
+            serv:loop(MessageHandler, State);
         #serv_options{message_handler = MessageHandler,
                       system_continue = SystemContinue} ->
             NewState = SystemContinue(Parent, DebugOptions, State),
-            loop(MessageHandler, NewState)
+            serv:loop(MessageHandler, NewState)
     end.
 
 %% Exported: system_get_state
