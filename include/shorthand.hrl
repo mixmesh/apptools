@@ -21,4 +21,11 @@
 -define(b2f, binary_to_float).
 -define(iof(Format, Args), io:format(Format, Args)).
 
+%% nybble to 1 hex-digits
+-define(b2x(X), tl(integer_to_list(((X) band 16#f)+16#10, 16))).
+%% binary to hex-string
+-define(bin2x(X), [[?b2x(H),?b2x(L)] || <<H:4,L:4>> <= (X)]).
+%% binary to byte : separated hex-string
+-define(bin2xx(X), string:join(?bin2x((X)), ":")).
+
 -endif.
