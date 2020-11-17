@@ -115,6 +115,9 @@ loop(MessageHandler, State) ->
             loop(MessageHandler, State);
         {noreply, NewState} ->
             loop(MessageHandler, NewState);
+        {system, undefined, code_switch} ->
+            %% Just loop again to use the new current message handler module
+            loop(MessageHandler, State);
         {system, From, Request} ->
             #serv_options{module_name = ModuleName,
                           parent = Parent,
