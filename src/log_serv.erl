@@ -7,6 +7,7 @@
 -export([add_dbg_hide/1, remove_dbg_hide/1]).
 -export([format_error/1]).
 -export([message_handler/1]).
+
 -export_type([filter_tags/0]).
 -export_type([error_reason/0]).
 
@@ -42,7 +43,7 @@
 start_link(ReadConfig) ->
     ?spawn_server_opts(
        fun(Parent) -> init(Parent, ReadConfig, tty_available()) end,
-       fun log_serv:message_handler/1,
+       fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
 
 %% Exported: is_log_enabled

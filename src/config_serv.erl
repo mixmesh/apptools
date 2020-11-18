@@ -5,6 +5,7 @@
 -export([tcp_send/3]).
 -export([atomify/1, lookup_schema/2, validate/4]).
 -export([format_error/1]).
+-export([message_handler/1]).
 
 -export_type([type_name/0, json_path/0, json_term/0, json_value/0,
               error_reason/0]).
@@ -120,7 +121,7 @@ start_link(ConfigFilename, AppSchemas, ReadConfig, Handler) ->
        fun(Parent) ->
                init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler)
        end,
-       fun message_handler/1,
+       fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
 
 %% Exported: subscribe
