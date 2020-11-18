@@ -16,12 +16,16 @@ trigger_serv_processes(_Module, []) ->
     ok;
 trigger_serv_processes(Module, [Pid|Rest]) ->
     case process_info(Pid, [current_function, dictionary]) of
-        [{current_function, {Module, _FunctionName, _Arity}},
-         {dictionary, DictionaryValues}] ->
-            case lists:keysearch('$initial_call', 1, DictionaryValues) of
-                {value, {_, {serv, init, 5}}} ->
-                    Pid ! {system, undefined, code_switch},
-                    trigger_serv_processes(Module, Rest);
+        [{current_function, {Module, _FunctionName, _Arity}}] ->
+            case process_info(Pid, [dictionary]) of
+                [{dictionary, List}] ->
+                    case lists:keysearch('$initial_call', 1, List) of
+                        {value, {_, {serv, init, 5}}} ->
+                            Pid ! {system, undefined, code_switch},
+                            trigger_serv_processes(Module, Rest);
+                        _ ->
+                            trigger_serv_processes(Module, Rest)
+                    end;
                 _ ->
                     trigger_serv_processes(Module, Rest)
             end;
