@@ -15,10 +15,10 @@ l(Module) ->
 trigger_serv_processes(_Module, []) ->
     ok;
 trigger_serv_processes(Module, [Pid|Rest]) ->
-    case process_info(Pid, [current_function, dictionary]) of
-        [{current_function, {Module, _FunctionName, _Arity}}] ->
-            case process_info(Pid, [dictionary]) of
-                [{dictionary, List}] ->
+    case process_info(Pid, current_function) of
+        {current_function, {Module, _FunctionName, _Arity}} ->
+            case process_info(Pid, dictionary) of
+                {dictionary, List} ->
                     case lists:keysearch('$initial_call', 1, List) of
                         {value, {_, {serv, init, 5}}} ->
                             Pid ! {system, undefined, code_switch},
