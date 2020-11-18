@@ -1,8 +1,7 @@
 -module(serv).
 -export([spawn_server/3, spawn_server/4]).
--export([cast/2]).
--export([call/2, call/3]).
--export([reply/2]).
+-export([cast/2, call/2, call/3, reply/2]).
+-export([l/1, lm/0]).
 -export([system_code_change/4,
          system_continue/3,
          system_get_state/1,
@@ -20,9 +19,7 @@
 
 %% Exported: spawn_server
 
--spec spawn_server(
-        atom(), any(), {Module :: atom(), FunctionName :: atom()} | function(),
-        #serv_options{}) ->
+-spec spawn_server(atom(), any(), function(), #serv_options{}) ->
           spawn_server_result().
 
 spawn_server(ModuleName, InitState, MessageHandler) ->
@@ -51,14 +48,6 @@ init(ModuleName, InitState, MessageHandler,
             ignore
     end,
     case InitState of
-        {M, F, A} ->
-            case apply(M, F, [Parent|A]) of
-                {ok, State} ->
-                    proc_lib:init_ack(Parent, {ok, self()}),
-                    loop(MessageHandler, State);
-                {error, Reason} ->
-                    exit(Reason)
-            end;
         Fun when is_function(Fun) ->
             case InitState(Parent) of
                 {ok, State} ->
@@ -188,6 +177,43 @@ call(To, Request, Timeout) ->
 reply({Pid, Ref}, Reply) ->
     Pid ! {reply, Ref, Reply},
     ok.
+
+%% Exported: l
+
+l(Module) ->
+    case c:l(Module) of
+        {'module', Module} ->
+            ok = trigger_serv_processes(Module, processes()),
+            {'module', Module};
+        OrElse ->
+            OrElse
+    end.
+
+trigger_serv_processes(_Module, []) ->
+    ok;
+trigger_serv_processes(Module, [Pid|Rest]) ->
+    case process_info(Pid, current_function) of
+        {current_function, {Module, _FunctionName, _Arity}} ->
+            case process_info(Pid, dictionary) of
+                {dictionary, List} ->
+                    case lists:keysearch('$initial_call', 1, List) of
+                        {value, {_, {serv, init, 5}}} ->
+                            Pid ! {system, undefined, code_switch},
+                            trigger_serv_processes(Module, Rest);
+                        _ ->
+                            trigger_serv_processes(Module, Rest)
+                    end;
+                _ ->
+                    trigger_serv_processes(Module, Rest)
+            end;
+        _ ->
+            trigger_serv_processes(Module, Rest)
+    end.
+
+%% Exported: lm
+
+lm() ->
+    [l(Module) || Module <- code:modified_modules()].
 
 %% Exported: system_code_changed
 
