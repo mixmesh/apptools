@@ -101,12 +101,10 @@ loop(MessageHandler, State) ->
             %% Just loop again to use the new current message handler module
             loop(MessageHandler, State);
         {system, From, Request} ->
-            #serv_options{module_name = ModuleName,
-                          parent = Parent,
-                          debug_options = DebugOptions} =
+            #serv_options{parent = Parent, debug_options = DebugOptions} =
                 get_options(),
-            sys:handle_system_msg(Request, From, Parent, ModuleName,
-                                  DebugOptions, State);
+            sys:handle_system_msg(Request, From, Parent, ?MODULE, DebugOptions,
+                                  State);
         {swap_message_handler, NewMessageHandler} ->
             loop(NewMessageHandler, State);
         {swap_message_handler, NewMessageHandler, NewState} ->
@@ -224,11 +222,11 @@ system_continue(Parent, DebugOptions, State) ->
     case get_options() of
         #serv_options{message_handler = MessageHandler,
                       system_continue = not_set} ->
-            serv:loop(MessageHandler, State);
+            ?MODULE:loop(MessageHandler, State);
         #serv_options{message_handler = MessageHandler,
                       system_continue = SystemContinue} ->
             NewState = SystemContinue(Parent, DebugOptions, State),
-            serv:loop(MessageHandler, NewState)
+            ?MODULE:loop(MessageHandler, NewState)
     end.
 
 %% Exported: system_get_state
