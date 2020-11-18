@@ -81,14 +81,7 @@ register_server(Name) ->
     end.
 
 loop(MessageHandler, State) ->
-    ReturnValue =
-        case MessageHandler of
-            {M, F} ->
-                M:F(State);
-            MessageHandler when is_function(MessageHandler) ->
-                MessageHandler(State)
-        end,
-    case ReturnValue of
+    case MessageHandler(State) of
         stop ->
             stopped;
         {stop, {Pid, Ref}, Reply} ->
