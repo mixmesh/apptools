@@ -15,7 +15,7 @@ foreach_worker(SupervisorPid, Do) ->
 foreach_worker(_Do, _Workers, []) ->
     ok;
 foreach_worker(Do, Workers, [{Id, Pid}|Rest]) ->
-    Do(Id, Pid, lists:keydelete(Id, 1, Workers)),
+    Do(Id, Pid, Workers),
     foreach_worker(Do, Workers, Rest).
 
 %% Exported: get_selected_worker_pids
