@@ -151,13 +151,17 @@ call(To, Request, Timeout) ->
                         ToPid
                 end
         end,
-    Ref = make_ref(),
-    Pid ! {call, {self(), Ref}, Request},
+    MonitorRef= monitor(process, Pid),
+    Pid ! {call, {self(), MonitorRef}, Request},
     receive
-        {reply, Ref, Reply} ->
-            Reply
+        {reply, MonitorRef, Reply} ->
+            true = demonitor(MonitorRef, [flush]),
+            Reply;
+        {'DOWN', MonitorRef, _, _, Info} ->
+            {error, Info}
     after
         Timeout ->
+            true = demonitor(MonitorRef, [flush]),
             {error, timeout}
     end.
 
