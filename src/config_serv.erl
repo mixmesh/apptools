@@ -4,7 +4,7 @@
 -export([json_lookup/2, json_path_to_string/1]).
 -export([tcp_send/3]).
 -export([atomify/1, lookup_schema/2, convert/4]).
--export([unconvert_value/2]).
+-export([unconvert_values/2, unconvert_value/2]).
 -export([format_error/1]).
 -export([message_handler/1]).
 
@@ -707,6 +707,13 @@ get_ip_address(IfName, [{IfName, IfOpts}|_]) ->
 get_ip_address(IfName, [_|Rest]) ->
     get_ip_address(IfName, Rest).
 
+%% Exported: unconvert_values
+
+unconvert_values( _JsonType, []) ->
+    [];
+unconvert_values(JsonType, [JsonValue|Rest]) ->
+    [unconvert_value(JsonType, JsonValue)|unconvert_values(JsonType, Rest)].
+
 %% Exported: unconvert_value
 
 unconvert_value(#json_type{untransform = Untransform} = JsonType, Value)
@@ -984,7 +991,7 @@ message_handler(#state{parent = Parent,
         {system, From, Request} ->
             {system, From, Request};
         UnknownMessage ->
-            error_logger:error_report(
+            error_lsogger:error_report(
               {?MODULE, ?LINE, {unknown_message, UnknownMessage}}),
             noreply
     end.
@@ -1037,8 +1044,3 @@ unconvert([Schema|SchemaRest], [JsonTerm|JsonTermRest], UnconvertedJsonTerm)
     UnconvertedFirstJsonTerm = unconvert(Schema, JsonTerm),
     unconvert([Schema|SchemaRest], JsonTermRest,
               UnconvertedFirstJsonTerm ++ UnconvertedJsonTerm).
-
-unconvert_values( _JsonType, []) ->
-    [];
-unconvert_values(JsonType, [JsonValue|Rest]) ->
-    [unconvert_value(JsonType, JsonValue)|unconvert_values(JsonType, Rest)].
