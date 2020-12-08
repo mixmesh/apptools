@@ -27,5 +27,5 @@ get_selected_worker_pids([Id|Rest], NeighbourWorkers) ->
         {value, {Id, Pid}, RemainingNeighbourWorkers} ->
             [Pid|get_selected_worker_pids(Rest, RemainingNeighbourWorkers)];
         false ->
-            [undefined|get_selected_worker_pids(Rest, NeighbourWorkers)]
+            throw({missing_neighbour, Id})
     end.

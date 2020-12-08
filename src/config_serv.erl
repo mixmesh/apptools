@@ -1,23 +1,19 @@
 -module(config_serv).
 -export([start_link/4]).
--export([subscribe/0, subscribe/1]).
+-export([subscribe/0, subscribe/1, export_config_file/0]).
 -export([json_lookup/2, json_path_to_string/1]).
 -export([tcp_send/3]).
--export([atomify/1, lookup_schema/2, validate/4]).
+-export([atomify/1, lookup_schema/2, convert/4]).
+-export([unconvert_value/2]).
 -export([format_error/1]).
 -export([message_handler/1]).
 
--export_type([type_name/0, json_path/0, json_term/0, json_value/0,
-              error_reason/0]).
+-export_type([type_name/0, json_path/0, json_value/0, error_reason/0]).
 
 -include_lib("kernel/include/file.hrl").
 -include("../include/config_schema.hrl").
 -include("../include/shorthand.hrl").
 -include("../include/serv.hrl").
-
--define(DEFAULT_CONTROL_ADDRESS, {127, 0, 0, 1}).
--define(DEFAULT_CONTROL_PORT, 23313).
--define(MAX_SESSIONS, 8).
 
 -record(state,
         {parent :: pid(),
@@ -30,12 +26,14 @@
         bool |
         {integer, integer(), integer() | unbounded} |
         {float, float(), float() | unbounded} |
-	ipaddress |
-	ipaddress_port |
-        ipv4address |
-        ipv4address_port |
-        hostname_port |
-        ipv6address |
+	ip_address |
+	ip_address_port |
+        ip4_address |
+        ip4_address_port |
+        ip6_address |
+        ip6_address_port |
+        hostname_port |       
+        interface_port |
         base64 |
         readable_file |
         writable_file |
@@ -44,28 +42,24 @@
         atom |
         string |
         path.
+-type ip_address_port() :: {inet:ip_address(), inet:port_number()}.
 -type ip4_address_port() :: {inet:ip4_address(), inet:port_number()}.
 -type ip6_address_port() :: {inet:ip6_address(), inet:port_number()}.
--type ip_address_port() :: {inet:ip_address(), inet:port_number()}.
 -type hostname_port() :: {string(), inet:port_number()}.
--type enum() :: atom().
--type json_value() :: inet:ip_address() |
-                      ip_address_port() |
-		      ip4_address_port() |
-		      ip6_address_port() |
-                      hostname_port() |
-                      enum() |
-                      integer() |
-                      boolean() |
-                      atom() |
-                      binary() |
-                      null |
-                      float().
--type json_term() ::
-        [{binary() | atom(), json_term()}] |
-        [json_term()] |
-        json_value().
-
+-type interface_port() :: {string(), inet:port_number()}.
+-type json_value() ::
+        boolean() |
+        integer() |
+        float() |
+        inet:ip_address() |
+        ip_address_port() |
+        ip4_address_port() |
+        ip6_address_port() |
+        hostname_port() |
+        interface_port() |
+        binary() |
+        atom() |
+        null.
 -type schema() :: [{atom(), #json_type{}}] |
                   [{atom(), schema()}] |
                   [schema()].
@@ -88,13 +82,14 @@
         {float_out_of_range, json_value(), float(), float(),
          json_path()} |
         {not_float, json_value(), json_path()} |
-        {not_ipaddress, json_value(), json_path()} |
-	{not_ipaddress_port, json_value(), json_path()} |
-        {not_ipv4address, json_value(), json_path()} |
-        {not_ipv4address_port, json_value(), json_path()} |
+        {not_ip_address, json_value(), json_path()} |
+	{not_ip_address_port, json_value(), json_path()} |
+        {not_ip4_address, json_value(), json_path()} |
+        {not_ip4_address_port, json_value(), json_path()} |
+        {not_ip6_address, json_value(), json_path()} |
+        {not_ip6_address_port, json_value(), json_path()} |
         {not_hostname_port, json_value(), json_path()} |
-        {not_ipv6address, json_value(), json_path()} |
-        {not_ipv6address_port, json_value(), json_path()} |
+        {not_interface_port, json_value(), json_path()} |
         {not_base64, json_value(), json_path()} |
         {not_readable_file, string(), json_path()} |
         {not_writable_file, string(), json_path()} |
@@ -103,7 +98,7 @@
         {not_atom, json_value(), json_path()} |
         {not_string, json_value(), json_path()} |
         {invalid_value, json_value(), json_path()} |
-        {invalid_convert_value, json_path(), string()}.
+        {invalid_transform_value, json_path(), string()}.
 
 -type read_config() :: fun(() -> ip4_address_port()).
 
@@ -113,8 +108,8 @@
                  AppSchemas :: [{atom(), schema()}],
                  ReadConfig :: read_config(),
                  Handler :: fun((gen_tcp:socket()) -> ok)) ->
-                        serv:spawn_server_result() |
-                        {config, config_error_reason()}.
+          serv:spawn_server_result() |
+          {config, config_error_reason()}.
 
 start_link(ConfigFilename, AppSchemas, ReadConfig, Handler) ->
     ?spawn_server_opts(
@@ -133,6 +128,13 @@ subscribe() ->
 
 subscribe(Pid) ->
     serv:cast(?MODULE, {subscribe, Pid}).
+
+%% Exported: export_config_file
+
+-spec export_config_file() -> ok.
+
+export_config_file() ->
+    serv:call(?MODULE, export_config_file).
 
 %% Exported: json_lookup
 
@@ -177,27 +179,10 @@ json_path_to_string([], Acc) ->
 json_path_to_string([Name|Rest], Acc) ->
     json_path_to_string(Rest, [?a2l(Name), $/|Acc]).
 
-json_value_to_string(JsonValue) when is_integer(JsonValue) ->
-    ?i2l(JsonValue);
-json_value_to_string(JsonValue) when is_float(JsonValue) ->
-    ?f2l(JsonValue);
-json_value_to_string(true) ->
-    "true";
-json_value_to_string(false) ->
-    "false";
-json_value_to_string(JsonValue) when is_atom(JsonValue) ->
-    ?a2l(JsonValue);
-json_value_to_string(JsonValue) when is_binary(JsonValue) ->
-    ?b2l(JsonValue);
-json_value_to_string({{_I1, _I2, _I3, _I4} = Ip4Address, Port}) ->
-    [inet_parse:ntoa(Ip4Address), ":", ?i2l(Port)];
-json_value_to_string({Hostname, Port}) when is_list(Hostname) ->
-    [Hostname, ":", ?i2l(Port)].
-
 %% Exported: tcp_send
 
 -spec tcp_send(inet:ip_address(), inet:port_number(), Message :: binary()) ->
-                      ok | {error, {posix, inet:posix()}}.
+          ok | {error, {posix, inet:posix()}}.
 
 tcp_send(Address, Port, Message) ->
     case gen_tcp:connect(Address, Port,
@@ -207,108 +192,6 @@ tcp_send(Address, Port, Message) ->
             gen_tcp:close(Socket);
         {error, Reason} ->
             {error, {posix, Reason}}
-    end.
-
-%%
-%% Server
-%%
-
-init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
-    ?MODULE = ets:new(?MODULE, [public, named_table]),
-    case load_config_file(ConfigFilename, AppSchemas) of
-        true ->
-            {IpAddress, Port} = ReadConfig(),
-            TcpServ =
-                proc_lib:spawn_link(
-                  fun() ->
-                          {ok, ListenSocket} =
-                              gen_tcp:listen(Port,
-                                             [{packet, 2},
-                                              {ip, IpAddress},
-                                              binary,
-                                              {reuseaddr, true}]),
-                          listener(ListenSocket, Handler)
-                  end),
-            {ok, #state{parent = Parent,
-                        tcp_serv = TcpServ,
-                        config_filename = ConfigFilename,
-                        app_schemas = AppSchemas}};
-        {error, Reason} ->
-            {error, {config, Reason}}
-    end.
-
-listener(ListenSocket, Handler) ->
-    {ok, Socket} = gen_tcp:accept(ListenSocket),
-    ok = Handler(Socket),
-    ok = gen_tcp:close(Socket),
-    listener(ListenSocket, Handler).
-
-message_handler(#state{parent = Parent,
-                       tcp_serv = TcpServ,
-                       config_filename = ConfigFilename,
-                       app_schemas = AppSchemas,
-                       subscribers = Subscribers} = S) ->
-    receive
-        {cast, {subscribe, ClientPid}} ->
-            case lists:member(ClientPid, Subscribers) of
-                true ->
-                    noreply;
-                false ->
-                    erlang:monitor(process, ClientPid),
-                    {noreply, S#state{subscribers = [ClientPid|Subscribers]}}
-            end;
-        {'DOWN', _MonitorRef, process, ClientPid, _Info} ->
-            UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
-            {noreply, S#state{subscribers = UpdatedSubscribers}};
-        reload ->
-	    %% Ensure that reload is called in all applications
-	    EnvBefore = application_controller:prep_config_change(),
-            case load_config_file(ConfigFilename, AppSchemas) of
-                true ->
-                    ok = application_controller:config_change(EnvBefore),
-                    %% Inform all subscribers
-                    lists:foreach(fun(ClientPid) ->
-                                          ClientPid ! config_updated
-                                  end, Subscribers),
-                    {noreply, S};
-                {error, _Reason} ->
-                    noreply
-            end;
-        {system, From, Request} ->
-            {system, From, Request};
-        {'EXIT', Parent, Reason} ->
-            exit(Reason);
-        {'EXIT', TcpServ, Reason} ->
-            exit(Reason);
-        UnknownMessage ->
-            error_logger:error_report(
-              {?MODULE, ?LINE, {unknown_message, UnknownMessage}}),
-            noreply
-    end.
-
-%%
-%% Load config file
-%%
-
-load_config_file(ConfigFilename, AppSchemas) ->
-    case file:read_file(ConfigFilename) of
-        {ok, EncodedJson} ->
-            case jsone:try_decode(EncodedJson, [{object_format, proplist}]) of
-                {ok, JsonTerm, _} ->
-                    try
-                        ConfigDir = filename:dirname(ConfigFilename),
-                        AtomifiedJsonTerm = atomify(JsonTerm),
-                        load_json_term(
-                          ConfigDir, AppSchemas, AtomifiedJsonTerm)
-                    catch
-                        throw:Reason ->
-                            {error, Reason}
-                    end;
-                {error, Reason} ->
-                    {error, {bad_json, Reason}}
-            end;
-        {error, Reason} ->
-            {error, {file_error, ConfigFilename, Reason}}
     end.
 
 %% Exported: atomify
@@ -327,18 +210,18 @@ atomify([JsonValue|Rest]) when is_list(Rest) ->
 load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
     {App, FirstNameInJsonPath, Schema, RemainingAppSchemas} =
         lookup_schema(AppSchemas, JsonTerm),
-    case validate(ConfigDir, Schema, JsonTerm, false) of
-        {ValidatedJsonTerm, []} when RemainingAppSchemas == [] ->
+    case convert(ConfigDir, Schema, JsonTerm, false) of
+        {ConvertedJsonTerm, []} when RemainingAppSchemas == [] ->
             ok = application:set_env(
-                   App, FirstNameInJsonPath, ValidatedJsonTerm,
+                   App, FirstNameInJsonPath, ConvertedJsonTerm,
                    [{persistent, true}]),
             true = ets:insert(?MODULE, {FirstNameInJsonPath, App});
-        {_ValidatedJsonTerm, []} ->
+        {_ConvertedJsonTerm, []} ->
             [{_App, [{Name, _JsonTerm}|_]}|_] = RemainingAppSchemas,
             throw({missing, Name});
-        {ValidatedJsonTerm, RemainingJsonTerm} ->
+        {ConvertedJsonTerm, RemainingJsonTerm} ->
             ok = application:set_env(
-                   App, FirstNameInJsonPath, ValidatedJsonTerm,
+                   App, FirstNameInJsonPath, ConvertedJsonTerm,
                    [{persistent, true}]),
             true = ets:insert(?MODULE, {FirstNameInJsonPath, App}),
             load_json_term(ConfigDir, RemainingAppSchemas,
@@ -360,79 +243,79 @@ lookup_schema([{_App, [{_Name, _JsonType}|_]} = AppSchema|Rest],
               MismatchedAppSchemas) ->
     lookup_schema(Rest, JsonTerm, [AppSchema|MismatchedAppSchemas]).
 
-%% Exported: validate
+%% Exported: convert
 
-validate(ConfigDir, Schema, JsonTerm, Lazy) ->
-    validate(ConfigDir, Schema, JsonTerm, Lazy, [], []).
+convert(ConfigDir, Schema, JsonTerm, Lazy) ->
+    convert(ConfigDir, Schema, JsonTerm, Lazy, [], []).
 
-validate(_ConfigDir, _Schema, [], true, _JsonPath,
-         ValidatedJsonTerm) ->
-    {lists:reverse(ValidatedJsonTerm), []};
-validate(_ConfigDir, [], RemainingJsonTerm, _Lazy, _JsonPath,
-         ValidatedJsonTerm) ->
-    {lists:reverse(ValidatedJsonTerm), RemainingJsonTerm};
+convert(_ConfigDir, _Schema, [], true, _JsonPath,
+        ConvertedJsonTerm) ->
+    {lists:reverse(ConvertedJsonTerm), []};
+convert(_ConfigDir, [], RemainingJsonTerm, _Lazy, _JsonPath,
+        ConvertedJsonTerm) ->
+    {lists:reverse(ConvertedJsonTerm), RemainingJsonTerm};
 %% Single value
-validate(ConfigDir,
-         [{Name, JsonType}|SchemaRest],
-         [{Name, JsonValue}|JsonTermRest], Lazy, JsonPath,
-         ValidatedJsonTerm)
+convert(ConfigDir,
+        [{Name, JsonType}|SchemaRest],
+        [{Name, JsonValue}|JsonTermRest], Lazy, JsonPath,
+        ConvertedJsonTerm)
   when is_record(JsonType, json_type) ->
-    ValidatedValue =
-        validate_value(ConfigDir, JsonType, JsonValue, [Name|JsonPath]),
-    validate(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
-             [{Name, ValidatedValue}|ValidatedJsonTerm]);
-validate(_ConfigDir,
-         [{Name, JsonType}|_SchemaRest],
-         [{AnotherName, _JsonValue}|_JsonTermRest], false, JsonPath,
-         _ValidatedJsonTerm)
+    ConvertedValue =
+        convert_value(ConfigDir, JsonType, JsonValue, [Name|JsonPath]),
+    convert(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
+            [{Name, ConvertedValue}|ConvertedJsonTerm]);
+convert(_ConfigDir,
+        [{Name, JsonType}|_SchemaRest],
+        [{AnotherName, _JsonValue}|_JsonTermRest], false, JsonPath,
+        _ConvertedJsonTerm)
   when is_record(JsonType, json_type) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
-validate(ConfigDir,
-         [{_Name, JsonType}|SchemaRest],
-         [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
-         ValidatedJsonTerm)
+convert(ConfigDir,
+        [{_Name, JsonType}|SchemaRest],
+        [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+        ConvertedJsonTerm)
   when is_record(JsonType, json_type) ->
-    validate(ConfigDir,
-             SchemaRest,
-             [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
-             ValidatedJsonTerm);
+    convert(ConfigDir,
+            SchemaRest,
+            [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+            ConvertedJsonTerm);
 %% Array of single values
-validate(ConfigDir,
-         [{Name, [JsonType]}|SchemaRest],
-         [{Name, JsonValues}|JsonTermRest], Lazy, JsonPath,
-         ValidatedJsonTerm)
+convert(ConfigDir,
+        [{Name, [JsonType]}|SchemaRest],
+        [{Name, JsonValues}|JsonTermRest], Lazy, JsonPath,
+        ConvertedJsonTerm)
   when is_record(JsonType, json_type) ->
-    ValidatedValues =
-        validate_values(ConfigDir, JsonType, JsonValues, [Name|JsonPath]),
-    validate(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
-             [{Name, ValidatedValues}|ValidatedJsonTerm]);
-validate(_ConfigDir,
-         [{Name, [JsonType]}|_SchemaRest],
-         [{AnotherName, _JsonValue}|_JsonTermRest], false, JsonPath,
-         _ValidatedJsonTerm)
+    ConvertedValues =
+        convert_values(ConfigDir, JsonType, JsonValues, [Name|JsonPath]),
+    convert(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
+            [{Name, ConvertedValues}|ConvertedJsonTerm]);
+convert(_ConfigDir,
+        [{Name, [JsonType]}|_SchemaRest],
+        [{AnotherName, _JsonValue}|_JsonTermRest], false, JsonPath,
+        _ConvertedJsonTerm)
   when is_record(JsonType, json_type) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
-validate(ConfigDir,
-         [{_Name, [JsonType]}|SchemaRest],
-         [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
-         ValidatedJsonTerm)
+convert(ConfigDir,
+        [{_Name, [JsonType]}|SchemaRest],
+        [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+        ConvertedJsonTerm)
   when is_record(JsonType, json_type) ->
-    validate(ConfigDir,
-             SchemaRest,
-             [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
-             ValidatedJsonTerm);
+    convert(ConfigDir,
+            SchemaRest,
+            [{AnotherName, JsonValue}|JsonTermRest], true, JsonPath,
+            ConvertedJsonTerm);
 %% Object
-validate(ConfigDir,
-         [{Name, NestedSchema}|SchemaRest],
-         [{Name, NestedJsonTerm}|JsonTermRest], Lazy, JsonPath,
-         ValidatedJsonTerm) ->
+convert(ConfigDir,
+        [{Name, NestedSchema}|SchemaRest],
+        [{Name, NestedJsonTerm}|JsonTermRest], Lazy, JsonPath,
+        ConvertedJsonTerm) ->
     case Lazy of
         false ->
-            {ValidatedNestedJsonTerm, []} =
-                validate(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []);
+            {ConvertedNestedJsonTerm, []} =
+                convert(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []);
         true ->
-            {ValidatedNestedJsonTerm, RemainingJsonTerm} =
-                validate(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []),
+            {ConvertedNestedJsonTerm, RemainingJsonTerm} =
+                convert(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []),
             case RemainingJsonTerm of
                 [] ->
                     ok;
@@ -440,94 +323,93 @@ validate(ConfigDir,
                     throw({unexpected, AnotherName})
             end
     end,
-    validate(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
-             [{Name, ValidatedNestedJsonTerm}|ValidatedJsonTerm]);
+    convert(ConfigDir, SchemaRest, JsonTermRest, Lazy, JsonPath,
+            [{Name, ConvertedNestedJsonTerm}|ConvertedJsonTerm]);
 %% Mismatch
-validate(_ConfigDir,
-         [{Name, _NestedSchema}|_SchemaRest],
-         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], false, JsonPath,
-         _ValidatedJsonTerm) ->
+convert(_ConfigDir,
+        [{Name, _NestedSchema}|_SchemaRest],
+        [{AnotherName, _NestedJsonTerm}|_JsonTermRest], false, JsonPath,
+        _ConvertedJsonTerm) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
-validate(ConfigDir,
-         [{_Name, _NestedSchema}|SchemaRest],
-         [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
-         ValidatedJsonTerm) ->
-    validate(ConfigDir,
-             SchemaRest,
-             [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
-             ValidatedJsonTerm);
+convert(ConfigDir,
+        [{_Name, _NestedSchema}|SchemaRest],
+        [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
+        ConvertedJsonTerm) ->
+    convert(ConfigDir,
+            SchemaRest,
+            [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
+            ConvertedJsonTerm);
 %% List
-validate(ConfigDir,
-         [Schema|SchemaRest],
-         [JsonTerm|JsonTermRest], Lazy, JsonPath,
-         ValidatedJsonTerm)
+convert(ConfigDir,
+        [Schema|SchemaRest],
+        [JsonTerm|JsonTermRest], Lazy, JsonPath,
+        ConvertedJsonTerm)
   when is_list(Schema), is_list(JsonTerm) ->
-    {ValidatedFirstJsonTerm, []} =
-        validate(ConfigDir, Schema, JsonTerm, Lazy, JsonPath, []),
-    validate(ConfigDir, [Schema|SchemaRest], JsonTermRest, Lazy, JsonPath,
-             ValidatedFirstJsonTerm ++ ValidatedJsonTerm).
+    {ConvertedFirstJsonTerm, []} =
+        convert(ConfigDir, Schema, JsonTerm, Lazy, JsonPath, []),
+    convert(ConfigDir, [Schema|SchemaRest], JsonTermRest, Lazy, JsonPath,
+            ConvertedFirstJsonTerm ++ ConvertedJsonTerm).
 
 %% bool
-validate_value(_ConfigDir, #json_type{name = bool, convert = Convert}, Value,
-               JsonPath)
+convert_value(_ConfigDir, #json_type{name = bool, transform = Transform}, Value,
+              JsonPath)
   when is_boolean(Value) ->
-    convert_value(Convert, Value, JsonPath);
-validate_value(_ConfigDir, #json_type{name = bool}, Value, JsonPath) ->
+    transform_value(Transform, Value, JsonPath);
+convert_value(_ConfigDir, #json_type{name = bool}, Value, JsonPath) ->
     throw({not_bool, Value, JsonPath});
 %% integer
-validate_value(_ConfigDir, #json_type{name = {integer, From, unbounded},
-                                      convert = Convert},
-               Value, JsonPath)
+convert_value(_ConfigDir, #json_type{name = {integer, From, unbounded},
+                                     transform = Transform},
+              Value, JsonPath)
   when is_integer(Value) andalso Value >= From andalso Value >= From ->
-    convert_value(Convert, Value, JsonPath);
-validate_value(_ConfigDir, #json_type{name = {integer, From, To},
-                                      convert = Convert}, Value,
-               JsonPath)
+    transform_value(Transform, Value, JsonPath);
+convert_value(_ConfigDir, #json_type{name = {integer, From, To},
+                                     transform = Transform}, Value,
+              JsonPath)
   when is_integer(Value) andalso Value >= From andalso Value =< To ->
-    convert_value(Convert, Value, JsonPath);
-validate_value(_ConfigDir, #json_type{name = {integer, From, To}}, Value,
-               JsonPath)
+    transform_value(Transform, Value, JsonPath);
+convert_value(_ConfigDir, #json_type{name = {integer, From, To}}, Value,
+              JsonPath)
   when is_integer(Value) ->
     throw({integer_out_of_range, Value, From, To, JsonPath});
-validate_value(_ConfigDir, #json_type{name = {integer, _From, _To}}, Value,
-               JsonPath) ->
+convert_value(_ConfigDir, #json_type{name = {integer, _From, _To}}, Value,
+              JsonPath) ->
     throw({not_integer, Value, JsonPath});
 %% float
-validate_value(_ConfigDir, #json_type{name = {float, From, unbounded},
-                                      convert = Convert},
-               Value, JsonPath)
+convert_value(_ConfigDir, #json_type{name = {float, From, unbounded},
+                                     transform = Transform},
+              Value, JsonPath)
   when is_float(Value) andalso Value >= From andalso Value >= From ->
-    convert_value(Convert, Value, JsonPath);
-validate_value(_ConfigDir, #json_type{name = {float, From, To},
-                                      convert = Convert}, Value,
-               JsonPath)
+    transform_value(Transform, Value, JsonPath);
+convert_value(_ConfigDir, #json_type{name = {float, From, To},
+                                     transform = Transform}, Value,
+              JsonPath)
   when is_float(Value) andalso Value >= From andalso Value =< To ->
-    convert_value(Convert, Value, JsonPath);
-validate_value(_ConfigDir, #json_type{name = {float, From, To}}, Value,
-               JsonPath)
+    transform_value(Transform, Value, JsonPath);
+convert_value(_ConfigDir, #json_type{name = {float, From, To}}, Value,
+              JsonPath)
   when is_float(Value) ->
     throw({float_out_of_range, Value, From, To, JsonPath});
-validate_value(_ConfigDir, #json_type{name = {float, _From, _To}}, Value,
-               JsonPath) ->
+convert_value(_ConfigDir, #json_type{name = {float, _From, _To}}, Value,
+              JsonPath) ->
     throw({not_float, Value, JsonPath});
-%% ipaddress
-validate_value(_ConfigDir, #json_type{name = ipaddress,
-                                      convert = Convert}, Value, JsonPath)
+%% ip_address
+convert_value(_ConfigDir, #json_type{name = ip_address,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
     case inet:parse_address(?b2l(Value)) of
         {ok, IpAddress} ->
-            convert_value(Convert, IpAddress, JsonPath);
+            transform_value(Transform, IpAddress, JsonPath);
         {error, einval} ->
-            throw({not_ipaddress, Value, JsonPath})
+            throw({not_ip_address, Value, JsonPath})
     end;
-
-%% ipaddress_port 1.2.3.4:80 or [10:11:12:13::abcd]:80
-validate_value(_ConfigDir, #json_type{name = ipaddress_port,
-                                      convert = Convert}, Value, JsonPath)
+%% ip_address_port 1.2.3.4:80 or [10:11:12:13::abcd]:80
+convert_value(_ConfigDir, #json_type{name = ip_address_port,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
     case string:rchr(?b2l(Value), $:) of
 	0 ->
-	    throw({not_ipaddress_port, Value, JsonPath});
+	    throw({not_ip_address_port, Value, JsonPath});
 	Pos ->
 	    %% [1:2:3:4]:80  Pos-1 = [1:2:3:4] Pos-3 = 1:2:3:4
 	    Size6 = Pos-3,
@@ -537,162 +419,185 @@ validate_value(_ConfigDir, #json_type{name = ipaddress_port,
 			{ok, Ipv6Address} ->
 			    case catch ?b2i(PortValue) of
 				Port when is_integer(Port) ->
-				    convert_value(Convert, {Ipv6Address, Port},
-						  JsonPath);
+				    transform_value(Transform, {Ipv6Address, Port},
+                                                    JsonPath);
 				_ ->
-				    throw({not_ipaddress_port, Value, JsonPath})
+				    throw({not_ip_address_port, Value, JsonPath})
 			    end;
 			{error, einval} ->
-			    throw({not_ipaddress_port, Value, JsonPath})
+			    throw({not_ip_address_port, Value, JsonPath})
 		    end;
 		{IpValue,<<$:,PortValue/binary>>} ->
 		    case inet:parse_ipv4_address(?b2l(IpValue)) of
-			{ok, Ipv4Address} ->
+			{ok, Ip4Address} ->
 			    case catch ?b2i(PortValue) of
 				Port when is_integer(Port) ->
-				    convert_value(Convert, {Ipv4Address, Port},
-						  JsonPath);
+				    transform_value(Transform, {Ip4Address, Port},
+                                                    JsonPath);
 				_ ->
-				    throw({not_ipaddress_port, Value, JsonPath})
+				    throw({not_ip_address_port, Value, JsonPath})
 			    end;
 			{error, einval} ->
-			    throw({not_ipaddress, Value, JsonPath})
+			    throw({not_ip_address, Value, JsonPath})
 		    end;
 		_ ->
-		    throw({not_ipaddress_port, Value, JsonPath})
+		    throw({not_ip_address_port, Value, JsonPath})
 	    end
     end;
-validate_value(_ConfigDir, #json_type{name = ipaddress_port}, Value,
-               JsonPath) ->
-    throw({not_ipaddress_port, Value, JsonPath});
-%% ipv4address
-validate_value(_ConfigDir, #json_type{name = ipv4address,
-                                      convert = Convert}, Value, JsonPath)
+convert_value(_ConfigDir, #json_type{name = ip_address_port}, Value,
+              JsonPath) ->
+    throw({not_ip_address_port, Value, JsonPath});
+%% ip4_address
+convert_value(_ConfigDir, #json_type{name = ip4_address,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
     case inet:parse_ipv4_address(?b2l(Value)) of
-        {ok, Ipv4Address} ->
-            convert_value(Convert, Ipv4Address, JsonPath);
+        {ok, Ip4Address} ->
+            transform_value(Transform, Ip4Address, JsonPath);
         {error, einval} ->
-            throw({not_ipv4_address, Value, JsonPath})
+            throw({not_ip4_address, Value, JsonPath})
     end;
-%% ipv4address_port
-validate_value(_ConfigDir, #json_type{name = ipv4address_port,
-                                      convert = Convert}, Value, JsonPath)
+%% ip4_address_port
+convert_value(_ConfigDir, #json_type{name = ip4_address_port,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
     case string:tokens(?b2l(Value), ":") of
-        [Ipv4AddressString, PortString] ->
-            case inet:parse_ipv4_address(Ipv4AddressString) of
-                {ok, Ipv4Address} ->
+        [Ip4AddressString, PortString] ->
+            case inet:parse_ipv4_address(Ip4AddressString) of
+                {ok, Ip4Address} ->
                     case catch ?l2i(PortString) of
                         Port when is_integer(Port) ->
-                            convert_value(Convert, {Ipv4Address, Port},
-                                          JsonPath);
+                            transform_value(Transform, {Ip4Address, Port},
+                                            JsonPath);
                         _ ->
-                            throw({not_ipv4address_port, Value, JsonPath})
+                            throw({not_ip4_address_port, Value, JsonPath})
                     end;
                 {error, einval} ->
-                    throw({not_ipv4address_port, Value, JsonPath})
+                    throw({not_ip4_address_port, Value, JsonPath})
             end;
         _ ->
-            throw({not_ipv4_address_port, Value, JsonPath})
+            throw({not_ip4_address_port, Value, JsonPath})
     end;
-validate_value(_ConfigDir, #json_type{name = ipv4address_port}, Value,
-               JsonPath) ->
-    throw({not_ipv4address_port, Value, JsonPath});
+convert_value(_ConfigDir, #json_type{name = ip4_address_port}, Value,
+              JsonPath) ->
+    throw({not_ip4_address_port, Value, JsonPath});
+%% ip6_address
+convert_value(_ConfigDir, #json_type{name = ip6_address,
+                                     transform = Transform}, Value, JsonPath)
+  when is_binary(Value) ->
+    case inet:parse_ipv6_address(?b2l(Value)) of
+        {ok, Ip6Address} ->
+            transform_value(Transform, Ip6Address, JsonPath);
+        {error, einval} ->
+            throw({not_ip6_address, Value, JsonPath})
+    end;
+convert_value(_ConfigDir, #json_type{name = ip6_address}, Value, JsonPath) ->
+    throw({not_ip6_address, Value, JsonPath});
+%% ip6_address_port
+convert_value(_ConfigDir, #json_type{name = ip6_address_port,
+                                     transform = Transform}, Value, JsonPath)
+  when is_binary(Value) ->
+    case string:tokens(?b2l(Value), ":") of
+	[Ip6AddressString, PortString] ->
+            case inet:parse_ipv6_address(Ip6AddressString) of
+                {ok, Ip6Address} ->
+                    case catch ?l2i(PortString) of
+                        Port when is_integer(Port) ->
+                            transform_value(Transform, {Ip6Address, Port},
+                                            JsonPath);
+                        _ ->
+                            throw({not_ip6_address_port, Value, JsonPath})
+                    end;
+                {error, einval} ->
+                    throw({not_ip6_address_port, Value, JsonPath})
+            end;
+        _ ->
+            throw({not_ip6_address_port, Value, JsonPath})
+    end;
+convert_value(_ConfigDir, #json_type{name = ip6_address_port}, Value,
+              JsonPath) ->
+    throw({not_ip6_address_port, Value, JsonPath});
 %% hostname_port
-validate_value(_ConfigDir, #json_type{name = hostname_port,
-                                      convert = Convert}, Value, JsonPath)
+convert_value(_ConfigDir, #json_type{name = hostname_port,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
     case string:tokens(?b2l(Value), ":") of
         [Hostname, PortString] ->
             case catch ?l2i(PortString) of
                 Port when is_integer(Port) ->
-                    convert_value(Convert, {Hostname, Port}, JsonPath);
+                    transform_value(Transform, {Hostname, Port}, JsonPath);
                 _ ->
                     throw({not_hostname_port, Value, JsonPath})
             end;
         _ ->
             throw({not_hostname_port, Value, JsonPath})
     end;
-validate_value(_ConfigDir, #json_type{name = hostname_port}, Value,
-               JsonPath) ->
+convert_value(_ConfigDir, #json_type{name = hostname_port}, Value,
+              JsonPath) ->
     throw({not_hostname_port, Value, JsonPath});
-%% ipv6address
-validate_value(_ConfigDir, #json_type{name = ipv6address,
-                                      convert = Convert}, Value, JsonPath)
-  when is_binary(Value) ->
-    case inet:parse_ipv6_address(?b2l(Value)) of
-        {ok, Ipv6Address} ->
-            convert_value(Convert, Ipv6Address, JsonPath);
-        {error, einval} ->
-            throw({not_ipv6_address, Value, JsonPath})
-    end;
-validate_value(_ConfigDir, #json_type{name = ipv6address}, Value, JsonPath) ->
-    throw({not_ipv6_address, Value, JsonPath});
-%% ipv6address_port
-validate_value(_ConfigDir, #json_type{name = ipv6address_port,
-                                      convert = Convert}, Value, JsonPath)
+%% interface_port
+convert_value(_ConfigDir, #json_type{name = interface_port,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
     case string:tokens(?b2l(Value), ":") of
-	[Ipv6AddressString, PortString] ->
-            case inet:parse_ipv6_address(Ipv6AddressString) of
-                {ok, Ipv6Address} ->
+        [Interface, PortString] ->
+            case get_ip_address(Interface) of
+                {ok, Address} ->
                     case catch ?l2i(PortString) of
                         Port when is_integer(Port) ->
-                            convert_value(Convert, {Ipv6Address, Port},
-                                          JsonPath);
+                            transform_value(Transform, {Address, Port}, JsonPath);
                         _ ->
-                            throw({not_ipv6address_port, Value, JsonPath})
+                            throw({not_interface_port, Value, JsonPath})
                     end;
-                {error, einval} ->
-                    throw({not_ipv6address_port, Value, JsonPath})
+                {error, not_found} ->
+                    throw({not_interface_port, Value, JsonPath})
             end;
         _ ->
-            throw({not_ipv6_address_port, Value, JsonPath})
+            throw({not_interface_port3, Value, JsonPath})
     end;
-validate_value(_ConfigDir, #json_type{name = ipv6address_port}, Value,
-               JsonPath) ->
-    throw({not_ipv6address_port, Value, JsonPath});
+convert_value(_ConfigDir, #json_type{name = interface_port}, Value,
+              JsonPath) ->
+    throw({not_interface_port, Value, JsonPath});
 %% base64
-validate_value(_ConfigDir, #json_type{name = base64,
-                                      convert = Convert}, Value, JsonPath)
+convert_value(_ConfigDir, #json_type{name = base64,
+                                     transform = Transform}, Value, JsonPath)
   when is_binary(Value) ->
-    convert_value(Convert, base64:decode(Value), JsonPath);
-validate_value(_ConfigDir, #json_type{name = base64}, Value, JsonPath) ->
+    transform_value(Transform, base64:decode(Value), JsonPath);
+convert_value(_ConfigDir, #json_type{name = base64}, Value, JsonPath) ->
     throw({not_base64, Value, JsonPath});
 %% readable_file
-validate_value(ConfigDir, #json_type{name = readable_file, convert = Convert},
-               Value, JsonPath)
+convert_value(ConfigDir, #json_type{name = readable_file, transform = Transform},
+              Value, JsonPath)
   when is_binary(Value) ->
     ExpandedFilename = expand_config_dir(ConfigDir, ?b2l(Value)),
     case file:read_file_info(ExpandedFilename) of
         {ok, #file_info{type = Type, access = Access}}
           when (Type == regular orelse Type == symlink) andalso
                (Access == read orelse Access == read_write) ->
-            convert_value(Convert, ?l2b(ExpandedFilename), JsonPath);
+            transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
         {ok, _FileInfo} ->
             throw({not_readable_file, ExpandedFilename, JsonPath});
         {error, Reason} ->
             throw({file_error, Value, Reason, JsonPath})
     end;
-validate_value(_ConfigDir, #json_type{name = readable_file}, Value, JsonPath) ->
+convert_value(_ConfigDir, #json_type{name = readable_file}, Value, JsonPath) ->
     throw({file_error, Value, einval, JsonPath});
 %% writable_file
-validate_value(ConfigDir, #json_type{name = writable_file, convert = Convert},
-               Value, JsonPath)
+convert_value(ConfigDir, #json_type{name = writable_file, transform = Transform},
+              Value, JsonPath)
   when is_binary(Value) ->
     ExpandedFilename = expand_config_dir(ConfigDir, ?b2l(Value)),
     case file:read_file_info(ExpandedFilename) of
         {ok, #file_info{type = Type, access = read_write}}
           when Type == regular orelse Type == symlink ->
-            convert_value(Convert, ?l2b(ExpandedFilename), JsonPath);
+            transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
         {ok, _FileInfo} ->
             throw({not_writable_file, _FileInfo, ExpandedFilename, JsonPath});
         {error, enoent} ->
             ParentDir = filename:dirname(ExpandedFilename),
             case file:read_file_info(ParentDir) of
                 {ok, #file_info{type = directory, access = read_write}} ->
-                    convert_value(Convert, ?l2b(ExpandedFilename), JsonPath);
+                    transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
                 {ok, _FileInfo} ->
                     throw({not_writable_directory, ParentDir, JsonPath});
                 {error, Reason} ->
@@ -701,74 +606,74 @@ validate_value(ConfigDir, #json_type{name = writable_file, convert = Convert},
         {error, Reason} ->
             throw({file_error, Value, Reason, JsonPath})
     end;
-validate_value(_ConfigDir, #json_type{name = writable_file}, Value, JsonPath) ->
+convert_value(_ConfigDir, #json_type{name = writable_file}, Value, JsonPath) ->
     throw({file_error, Value, einval, JsonPath});
 %% readable_directory
-validate_value(ConfigDir, #json_type{name = readable_directory,
-                                     convert = Convert},
-               Value, JsonPath)
+convert_value(ConfigDir, #json_type{name = readable_directory,
+                                    transform = Transform},
+              Value, JsonPath)
   when is_binary(Value) ->
     ExpandedFilename = expand_config_dir(ConfigDir, ?b2l(Value)),
     case file:read_file_info(ExpandedFilename) of
         {ok, #file_info{type = directory, access = read}} ->
-            convert_value(Convert, ?l2b(ExpandedFilename), JsonPath);
+            transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
         {ok, #file_info{type = directory, access = read_write}} ->
-            convert_value(Convert, ?l2b(ExpandedFilename), JsonPath);
+            transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
         {ok, _FileInfo} ->
             throw({not_readable_directory, ExpandedFilename, JsonPath});
         {error, Reason} ->
             throw({file_error, Value, Reason, JsonPath})
     end;
 %% writable_directory
-validate_value(ConfigDir, #json_type{name = writable_directory,
-                                     convert = Convert},
-               Value, JsonPath)
+convert_value(ConfigDir, #json_type{name = writable_directory,
+                                    transform = Transform},
+              Value, JsonPath)
   when is_binary(Value) ->
     ExpandedFilename = expand_config_dir(ConfigDir, ?b2l(Value)),
     case file:read_file_info(ExpandedFilename) of
         {ok, #file_info{type = directory, access = read_write}} ->
-            convert_value(Convert, ?l2b(ExpandedFilename), JsonPath);
+            transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
         {ok, _FileInfo} ->
             throw({not_writable_directory, ExpandedFilename, JsonPath});
         {error, Reason} ->
             throw({file_error, Value, Reason, JsonPath})
     end;
-validate_value(_ConfigDir, #json_type{name = writable_directory}, Value,
-               JsonPath) ->
+convert_value(_ConfigDir, #json_type{name = writable_directory}, Value,
+              JsonPath) ->
     throw({file_error, Value, einval, JsonPath});
 %% atom
-validate_value(_ConfigDir, #json_type{name = atom, convert = Convert}, Value,
-               JsonPath)
+convert_value(_ConfigDir, #json_type{name = atom, transform = Transform}, Value,
+              JsonPath)
   when is_binary(Value) ->
-    convert_value(Convert, ?b2a(Value), JsonPath);
-validate_value(_ConfigDir, #json_type{name = atom}, Value, JsonPath) ->
+    transform_value(Transform, ?b2a(Value), JsonPath);
+convert_value(_ConfigDir, #json_type{name = atom}, Value, JsonPath) ->
     throw({not_atom, Value, JsonPath});
 %% string
-validate_value(_ConfigDir, #json_type{name = string, convert = Convert}, Value,
-               JsonPath)
+convert_value(_ConfigDir, #json_type{name = string, transform = Transform}, Value,
+              JsonPath)
   when is_binary(Value) ->
-    convert_value(Convert, Value, JsonPath);
-validate_value(_ConfigDir, #json_type{name = string}, Value, JsonPath) ->
+    transform_value(Transform, Value, JsonPath);
+convert_value(_ConfigDir, #json_type{name = string}, Value, JsonPath) ->
     throw({not_string, Value, JsonPath});
 %% path
-validate_value(ConfigDir, #json_type{name = path, convert = Convert}, Value,
-               JsonPath)
+convert_value(ConfigDir, #json_type{name = path, transform = Transform}, Value,
+              JsonPath)
   when is_binary(Value) ->
     Path = expand_config_dir(ConfigDir, ?b2l(Value)),
-    convert_value(Convert, Path, JsonPath);
-validate_value(_ConfigDir, #json_type{name = path}, Value, JsonPath) ->
+    transform_value(Transform, Path, JsonPath);
+convert_value(_ConfigDir, #json_type{name = path}, Value, JsonPath) ->
     throw({not_string, Value, JsonPath}).
 
-convert_value(undefined, Value, _JsonPath) ->
+transform_value(undefined, Value, _JsonPath) ->
     Value;
-convert_value(Convert, Value, JsonPath) ->
-    case catch Convert(Value) of
+transform_value(Transform, Value, JsonPath) ->
+    case catch Transform(Value) of
         {failed, Reason} ->
-            throw({invalid_convert_value, JsonPath, Reason});
+            throw({invalid_transform_value, JsonPath, Reason});
         {'EXIT', _Reason} ->
             throw({invalid_value, Value, JsonPath});
-        ConvertedValue ->
-            ConvertedValue
+        TransformedValue ->
+            TransformedValue
     end.
 
 expand_config_dir(_ConfigDir, []) ->
@@ -778,11 +683,86 @@ expand_config_dir(ConfigDir, "${CONFIG_DIR}" ++ Rest) ->
 expand_config_dir(ConfigDir, [C|Rest]) ->
     [C|expand_config_dir(ConfigDir, Rest)].
 
-validate_values(_ConfigDir, _JsonType, [], _JsonPath) ->
+convert_values(_ConfigDir, _JsonType, [], _JsonPath) ->
     [];
-validate_values(ConfigDir, JsonType, [JsonValue|Rest], JsonPath) ->
-    [validate_value(ConfigDir, JsonType, JsonValue, JsonPath)|
-     validate_values(ConfigDir, JsonType, Rest, JsonPath)].
+convert_values(ConfigDir, JsonType, [JsonValue|Rest], JsonPath) ->
+    [convert_value(ConfigDir, JsonType, JsonValue, JsonPath)|
+     convert_values(ConfigDir, JsonType, Rest, JsonPath)].
+
+get_ip_address("*") ->
+    {ok, {0, 0, 0, 0}};
+get_ip_address(IfName) ->
+    {ok, IfAddrs} = inet:getifaddrs(),
+    get_ip_address(IfName, IfAddrs).
+
+get_ip_address(IfName, []) ->
+    {error, not_found};
+get_ip_address(IfName, [{IfName, IfOpts}|_]) ->
+    case lists:keysearch(addr, 1, IfOpts) of
+        {value, {_, Addr}} ->
+            {ok, Addr};
+        false ->
+            {error, not_found}
+    end;
+get_ip_address(IfName, [_|Rest]) ->
+    get_ip_address(IfName, Rest).
+
+%% Exported: unconvert_value
+
+unconvert_value(#json_type{untransform = Untransform} = JsonType, Value)
+  when Untransform /= undefined ->
+    unconvert_value(JsonType#json_type{untransform = undefined}, Untransform(Value));
+unconvert_value(#json_type{name = bool}, Value) ->
+    Value;
+unconvert_value(#json_type{name = {integer, _, _}}, Value) ->
+    Value;
+unconvert_value(#json_type{name = {float, _, _}}, Value) ->
+    Value;
+unconvert_value(#json_type{name = Name}, Value)
+  when Name == ip_address orelse
+       Name == ip4_address orelse
+       Name == ip6_address ->
+    ?l2b(inet_parse:ntoa(Value));
+unconvert_value(#json_type{name = Name}, {IpAddress, Port})
+  when Name == ip_address_port orelse
+       Name == ip4_address_port orelse
+       Name == ip6_address_port ->
+    ?l2b(io_lib:format("~s:~w", [inet_parse:ntoa(IpAddress), Port]));
+unconvert_value(#json_type{name = hostname_port}, {Hostname, Port}) ->
+    ?l2b(io_lib:format("~s:~w", [Hostname, Port]));
+unconvert_value(#json_type{name = interface_port}, {IpAddress, Port}) ->
+    {ok, Interface} = get_interface(IpAddress),
+    ?l2b(io_lib:format("~s:~w", [Interface, Port]));
+unconvert_value(#json_type{name = base64}, Value) ->
+    base64:encode(Value);
+unconvert_value(#json_type{name = Name}, Value)
+  when Name == readable_file orelse
+       Name == writable_file orelse
+       Name == readable_directory orelse
+       Name == writable_directory ->
+    Value;
+unconvert_value(#json_type{name = atom}, Value) ->
+    ?a2b(Value);
+unconvert_value(#json_type{name = string}, Value) ->
+    Value;
+unconvert_value(#json_type{name = path}, Value) ->
+    Value.
+
+get_interface({0, 0, 0, 0}) ->
+    {ok, "*"};
+get_interface(IpAddress) ->
+    {ok, IfAddrs} = inet:getifaddrs(),
+    get_interface(IpAddress, IfAddrs).
+
+get_interface(IpAddress, []) ->
+    {error, not_found};
+get_interface(IpAddress, [{IfName, IfOpts}|Rest]) ->
+    case lists:keysearch(addr, 1, IfOpts) of
+        {value, {_, IpAddress}} ->
+            {ok, IfName};
+        _ ->
+            get_interface(IpAddress, Rest)
+    end.
 
 %% Exported: format_error
 
@@ -793,7 +773,7 @@ format_error(already_started) ->
 format_error({posix, Reason}) ->
     ?l2b(inet:format_error(Reason));
 format_error({config, {bad_json, Reason}}) ->
-%%    <<"Syntax error">>;
+    %%    <<"Syntax error">>;
     ?l2b(io_lib:format("Bad JSON: ~p", [Reason]));
 format_error({config, {file_error, Filename, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]));
@@ -829,32 +809,36 @@ format_error({config, {not_float, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid float",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipaddress, Value, JsonPath}}) ->
+format_error({config, {not_ip_address, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid ip-address",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipaddress_port, Value, JsonPath}}) ->
+format_error({config, {not_ip_address_port, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid ip-address and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipv4address, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address",
+format_error({config, {not_ip4_address, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip4-address",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipv4address_port, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv4-address and port",
+format_error({config, {not_ip4_address_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip4-address and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
 format_error({config, {not_hostname_port, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid hostname and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipv6_address, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address",
+format_error({config, {not_interface_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid interface and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {not_ipv6address_port, Value, JsonPath}}) ->
-    ?l2b(io_lib:format("~s: ~s is not a valid ipv6-address and port",
+format_error({config, {not_ip6_address, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip6-address",
+                       [json_path_to_string(JsonPath),
+                        json_value_to_string(Value)]));
+format_error({config, {not_ip6_address_port, Value, JsonPath}}) ->
+    ?l2b(io_lib:format("~s: ~s is not a valid ip6-address and port",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
 format_error({config, {not_base64, Value, JsonPath}}) ->
@@ -885,9 +869,176 @@ format_error({config, {invalid_value, Value, JsonPath}}) ->
     ?l2b(io_lib:format("~s: ~s is not a valid value",
                        [json_path_to_string(JsonPath),
                         json_value_to_string(Value)]));
-format_error({config, {invalid_convert_value, JsonPath, Reason}}) ->
+format_error({config, {invalid_transform_value, JsonPath, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
 format_error(UnknownReason) ->
     error_logger:error_report(
       {?MODULE, ?LINE, {unknown_message, UnknownReason}}),
     <<"Internal error">>.
+
+json_value_to_string(JsonValue) when is_binary(JsonValue) ->
+    lists:flatten(io_lib:format("~s", [JsonValue]));
+json_value_to_string(JsonValue) ->
+    lists:flatten(io_lib:format("~p", [JsonValue])).
+
+%%
+%% Server
+%%
+
+init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
+    ?MODULE = ets:new(?MODULE, [public, named_table]),
+    RunningConfigFilename = ConfigFilename ++ "-running",
+    case filelib:is_regular(RunningConfigFilename) of
+        true ->
+            ok;
+        false ->
+            {ok, _} = file:copy(ConfigFilename, RunningConfigFilename)
+    end,
+    case load_config_file(RunningConfigFilename, AppSchemas) of
+        true ->
+            {IpAddress, Port} = ReadConfig(),
+            TcpServ =
+                proc_lib:spawn_link(
+                  fun() ->
+                          {ok, ListenSocket} =
+                              gen_tcp:listen(Port,
+                                             [{packet, 2},
+                                              {ip, IpAddress},
+                                              binary,
+                                              {reuseaddr, true}]),
+                          listener(ListenSocket, Handler)
+                  end),
+            {ok, #state{parent = Parent,
+                        tcp_serv = TcpServ,
+                        config_filename = RunningConfigFilename,
+                        app_schemas = AppSchemas}};
+        {error, Reason} ->
+            {error, {config, Reason}}
+    end.
+
+load_config_file(ConfigFilename, AppSchemas) ->
+    case file:read_file(ConfigFilename) of
+        {ok, EncodedJson} ->
+            case jsone:try_decode(EncodedJson, [{object_format, proplist}]) of
+                {ok, JsonTerm, _} ->
+                    try
+                        ConfigDir = filename:dirname(ConfigFilename),
+                        AtomifiedJsonTerm = atomify(JsonTerm),
+                        load_json_term(
+                          ConfigDir, AppSchemas, AtomifiedJsonTerm)
+                    catch
+                        throw:Reason ->
+                            {error, Reason}
+                    end;
+                {error, Reason} ->
+                    {error, {bad_json, Reason}}
+            end;
+        {error, Reason} ->
+            {error, {file_error, ConfigFilename, Reason}}
+    end.
+
+listener(ListenSocket, Handler) ->
+    {ok, Socket} = gen_tcp:accept(ListenSocket),
+    ok = Handler(Socket),
+    ok = gen_tcp:close(Socket),
+    listener(ListenSocket, Handler).
+
+message_handler(#state{parent = Parent,
+                       tcp_serv = TcpServ,
+                       config_filename = ConfigFilename,
+                       app_schemas = AppSchemas,
+                       subscribers = Subscribers} = S) ->
+    receive
+        {cast, {subscribe, ClientPid}} ->
+            case lists:member(ClientPid, Subscribers) of
+                true ->
+                    noreply;
+                false ->
+                    erlang:monitor(process, ClientPid),
+                    {noreply, S#state{subscribers = [ClientPid|Subscribers]}}
+            end;
+        {call, From, export_config_file} ->
+            ok = replace_config_file(ConfigFilename, AppSchemas),
+            {reply, From, ok};
+        {'DOWN', _MonitorRef, process, ClientPid, _Info} ->
+            UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
+            {noreply, S#state{subscribers = UpdatedSubscribers}};
+        reload ->
+	    %% Ensure that reload is called in all applications
+	    EnvBefore = application_controller:prep_config_change(),
+            case load_config_file(ConfigFilename, AppSchemas) of
+                true ->
+                    ok = application_controller:config_change(EnvBefore),
+                    %% Inform all subscribers
+                    lists:foreach(fun(ClientPid) ->
+                                          ClientPid ! config_updated
+                                  end, Subscribers),
+                    {noreply, S};
+                {error, _Reason} ->
+                    noreply
+            end;
+        {'EXIT', Parent, Reason} ->
+            exit(Reason);
+        {'EXIT', TcpServ, Reason} ->
+            exit(Reason);
+        {system, From, Request} ->
+            {system, From, Request};
+        UnknownMessage ->
+            error_logger:error_report(
+              {?MODULE, ?LINE, {unknown_message, UnknownMessage}}),
+            noreply
+    end.
+
+replace_config_file(ConfigFilename, AppSchemas) ->            
+    JsonTerm = unconvert(AppSchemas),
+    {ok, Binary} =
+        jsone:try_encode(JsonTerm,
+                         [{float_format, [{decimals, 4}, compact]},
+                          {indent, 2},
+                          {object_key_type, value},
+                          {space, 1},
+                          native_forward_slash]),
+    file:write_file(ConfigFilename, Binary).
+
+unconvert([]) ->
+    [];
+unconvert([{App, [{Name, _JsonType}|_] = Schema}|Rest]) ->
+    {ok, JsonTerm} = application:get_env(App, Name),
+    unconvert(Schema, JsonTerm) ++ unconvert(Rest).
+
+unconvert(Schema, JsonTerm) ->
+    unconvert(Schema, JsonTerm, []).
+
+unconvert([], [], UnconvertedJsonTerm) ->
+    lists:reverse(UnconvertedJsonTerm);
+%% Single value
+unconvert([{Name, JsonType}|SchemaRest],
+          [{Name, JsonValue}|JsonTermRest], UnconvertedJsonTerm)
+  when is_record(JsonType, json_type) ->
+    UnconvertedValue = unconvert_value(JsonType, JsonValue),
+    unconvert(SchemaRest, JsonTermRest,
+              [{Name, UnconvertedValue}|UnconvertedJsonTerm]);
+%% Array of single values
+unconvert([{Name, [JsonType]}|SchemaRest],
+          [{Name, JsonValues}|JsonTermRest], UnconvertedJsonTerm)
+  when is_record(JsonType, json_type) ->
+    UnconvertedValues = unconvert_values(JsonType, JsonValues),
+    unconvert(SchemaRest, JsonTermRest,
+              [{Name, UnconvertedValues}|UnconvertedJsonTerm]);
+%% Object
+unconvert([{Name, NestedSchema}|SchemaRest],
+          [{Name, NestedJsonTerm}|JsonTermRest], UnconvertedJsonTerm) ->
+    UnconvertedNestedJsonTerm = unconvert(NestedSchema, NestedJsonTerm),
+    unconvert(SchemaRest, JsonTermRest,
+              [{Name, UnconvertedNestedJsonTerm}|UnconvertedJsonTerm]);
+%% List
+unconvert([Schema|SchemaRest], [JsonTerm|JsonTermRest], UnconvertedJsonTerm)
+  when is_list(Schema), is_list(JsonTerm) ->
+    UnconvertedFirstJsonTerm = unconvert(Schema, JsonTerm),
+    unconvert([Schema|SchemaRest], JsonTermRest,
+              UnconvertedFirstJsonTerm ++ UnconvertedJsonTerm).
+
+unconvert_values( _JsonType, []) ->
+    [];
+unconvert_values(JsonType, [JsonValue|Rest]) ->
+    [unconvert_value(JsonType, JsonValue)|unconvert_values(JsonType, Rest)].

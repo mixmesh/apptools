@@ -3,15 +3,14 @@
 
 %% Exported: lookup
 
--spec lookup(config_serv:json_path()) -> config_serv:json_term().
+-spec lookup(config_serv:json_path()) -> any().
 
 lookup([Name|_] = JsonPath) ->
     [{_, App}] = ets:lookup(config_serv, Name),
     {ok, JsonTerm} = application:get_env(App, Name),
     config_serv:json_lookup(JsonTerm, JsonPath).
 
--spec lookup(config_serv:json_path(), config_serv:json_value()) ->
-          config_serv:json_term().
+-spec lookup(config_serv:json_path(), config_serv:json_value()) -> any().
 
 lookup([Name|_] = JsonPath, DefaultValue) ->
     case ets:lookup(config_serv, Name) of
@@ -29,8 +28,7 @@ lookup([Name|_] = JsonPath, DefaultValue) ->
 
 %% Exported: lookup_children
 
--spec lookup_children(config_serv:json_path(), config_serv:json_value()) ->
-          [config_serv:json_term()].
+-spec lookup_children(config_serv:json_path(), any()) -> [any()].
 
 lookup_children([], _KeyValueList) ->
     [];
