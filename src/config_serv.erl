@@ -991,7 +991,7 @@ message_handler(#state{parent = Parent,
         {system, From, Request} ->
             {system, From, Request};
         UnknownMessage ->
-            error_lsogger:error_report(
+            error_logger:error_report(
               {?MODULE, ?LINE, {unknown_message, UnknownMessage}}),
             noreply
     end.
