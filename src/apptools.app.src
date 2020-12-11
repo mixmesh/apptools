@@ -1,0 +1,6 @@
+%% -*- erlang -*-
+{application, apptools,
+ [{description,"Application tools"},
+  {vsn, git},
+  {modules, ["@@MODULES@@"]},
+  {applications, [kernel, stdlib]}]}.
