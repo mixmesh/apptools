@@ -379,13 +379,13 @@ convert_value(_ConfigDir, #json_type{name = {integer, _From, _To}}, Value,
 convert_value(_ConfigDir, #json_type{name = {float, From, unbounded},
                                      transform = Transform},
               Value, JsonPath)
-  when is_float(Value) andalso Value >= From andalso Value >= From ->
-    transform_value(Transform, Value, JsonPath);
+  when is_number(Value) andalso Value >= From andalso Value >= From ->
+    transform_value(Transform, Value * 1.0, JsonPath);
 convert_value(_ConfigDir, #json_type{name = {float, From, To},
                                      transform = Transform}, Value,
               JsonPath)
-  when is_float(Value) andalso Value >= From andalso Value =< To ->
-    transform_value(Transform, Value, JsonPath);
+  when is_number(Value) andalso Value >= From andalso Value =< To ->
+    transform_value(Transform, Value * 1.0, JsonPath);
 convert_value(_ConfigDir, #json_type{name = {float, From, To}}, Value,
               JsonPath)
   when is_float(Value) ->

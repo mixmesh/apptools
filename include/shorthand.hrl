@@ -10,6 +10,7 @@
 -define(l2i, list_to_integer).
 -define(l2f, list_to_float).
 -define(f2l, float_to_list).
+-define(f2b, float_to_binary).
 -define(l2t, list_to_tuple).
 -define(t2l, tuple_to_list).
 -define(t2b, term_to_binary).
