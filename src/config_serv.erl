@@ -318,10 +318,12 @@ convert(ConfigDir,
     case Lazy of
         false ->
             {ConvertedNestedJsonTerm, []} =
-                convert(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []);
+                convert(ConfigDir, NestedSchema, NestedJsonTerm, Lazy,
+                        [Name|JsonPath], []);
         true ->
             {ConvertedNestedJsonTerm, RemainingJsonTerm} =
-                convert(ConfigDir, NestedSchema, NestedJsonTerm, Lazy, [Name|JsonPath], []),
+                convert(ConfigDir, NestedSchema, NestedJsonTerm, Lazy,
+                        [Name|JsonPath], []),
             case RemainingJsonTerm of
                 [] ->
                     ok;
@@ -425,10 +427,11 @@ convert_value(_ConfigDir, #json_type{name = ip_address_port,
 			{ok, Ipv6Address} ->
 			    case catch ?b2i(PortValue) of
 				Port when is_integer(Port) ->
-				    transform_value(Transform, {Ipv6Address, Port},
-                                                    JsonPath);
+				    transform_value(
+                                      Transform, {Ipv6Address, Port}, JsonPath);
 				_ ->
-				    throw({not_ip_address_port, Value, JsonPath})
+				    throw({not_ip_address_port, Value,
+                                           JsonPath})
 			    end;
 			{error, einval} ->
 			    throw({not_ip_address_port, Value, JsonPath})
@@ -438,10 +441,11 @@ convert_value(_ConfigDir, #json_type{name = ip_address_port,
 			{ok, Ip4Address} ->
 			    case catch ?b2i(PortValue) of
 				Port when is_integer(Port) ->
-				    transform_value(Transform, {Ip4Address, Port},
-                                                    JsonPath);
+				    transform_value(
+                                      Transform, {Ip4Address, Port}, JsonPath);
 				_ ->
-				    throw({not_ip_address_port, Value, JsonPath})
+				    throw({not_ip_address_port, Value,
+                                           JsonPath})
 			    end;
 			{error, einval} ->
 			    throw({not_ip_address, Value, JsonPath})
@@ -572,7 +576,8 @@ convert_value(_ConfigDir, #json_type{name = base64,
 convert_value(_ConfigDir, #json_type{name = base64}, Value, JsonPath) ->
     throw({not_base64, Value, JsonPath});
 %% readable_file
-convert_value(ConfigDir, #json_type{name = readable_file, transform = Transform},
+convert_value(ConfigDir, #json_type{name = readable_file,
+                                    transform = Transform},
               Value, JsonPath)
   when is_binary(Value) ->
     ExpandedFilename = expand_config_dir(ConfigDir, ?b2l(Value)),
@@ -589,7 +594,8 @@ convert_value(ConfigDir, #json_type{name = readable_file, transform = Transform}
 convert_value(_ConfigDir, #json_type{name = readable_file}, Value, JsonPath) ->
     throw({file_error, Value, einval, JsonPath});
 %% writable_file
-convert_value(ConfigDir, #json_type{name = writable_file, transform = Transform},
+convert_value(ConfigDir, #json_type{name = writable_file,
+                                    transform = Transform},
               Value, JsonPath)
   when is_binary(Value) ->
     ExpandedFilename = expand_config_dir(ConfigDir, ?b2l(Value)),
@@ -603,7 +609,8 @@ convert_value(ConfigDir, #json_type{name = writable_file, transform = Transform}
             ParentDir = filename:dirname(ExpandedFilename),
             case file:read_file_info(ParentDir) of
                 {ok, #file_info{type = directory, access = read_write}} ->
-                    transform_value(Transform, ?l2b(ExpandedFilename), JsonPath);
+                    transform_value(Transform, ?l2b(ExpandedFilename),
+                                    JsonPath);
                 {ok, _FileInfo} ->
                     throw({not_writable_directory, ParentDir, JsonPath});
                 {error, Reason} ->
@@ -648,14 +655,16 @@ convert_value(_ConfigDir, #json_type{name = writable_directory}, Value,
               JsonPath) ->
     throw({file_error, Value, einval, JsonPath});
 %% atom
-convert_value(_ConfigDir, #json_type{name = atom, transform = Transform}, Value,
+convert_value(_ConfigDir, #json_type{name = atom,
+                                     transform = Transform}, Value,
               JsonPath)
   when is_binary(Value) ->
     transform_value(Transform, ?b2a(Value), JsonPath);
 convert_value(_ConfigDir, #json_type{name = atom}, Value, JsonPath) ->
     throw({not_atom, Value, JsonPath});
 %% string
-convert_value(_ConfigDir, #json_type{name = string, transform = Transform}, Value,
+convert_value(_ConfigDir, #json_type{name = string,
+                                     transform = Transform}, Value,
               JsonPath)
   when is_binary(Value) ->
     transform_value(Transform, Value, JsonPath);
@@ -724,7 +733,8 @@ unconvert_values(JsonType, [JsonValue|Rest]) ->
 
 unconvert_value(#json_type{untransform = Untransform} = JsonType, Value)
   when Untransform /= undefined ->
-    unconvert_value(JsonType#json_type{untransform = undefined}, Untransform(Value));
+    unconvert_value(JsonType#json_type{untransform = undefined},
+                    Untransform(Value));
 unconvert_value(#json_type{name = bool}, Value) ->
     Value;
 unconvert_value(#json_type{name = {integer, _, _}}, Value) ->
@@ -932,11 +942,9 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
                         proc_lib:spawn_link(
                           fun() ->
                                   {ok, ListenSocket} =
-                                      gen_tcp:listen(Port,
-                                                     [{packet, 2},
-                                                      {ip, IpAddress},
-                                                      binary,
-                                                      {reuseaddr, true}]),
+                                      gen_tcp:listen(
+                                        Port, [{packet, 2}, {ip, IpAddress},
+                                               binary, {reuseaddr, true}]),
                                   listener(ListenSocket, ListenerHandler)
                           end),
                     {ok, #state{parent = Parent,
