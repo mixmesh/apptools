@@ -695,7 +695,7 @@ get_ip_address(IfName) ->
     {ok, IfAddrs} = inet:getifaddrs(),
     get_ip_address(IfName, IfAddrs).
 
-get_ip_address(IfName, []) ->
+get_ip_address(_IfName, []) ->
     {error, not_found};
 get_ip_address(IfName, [{IfName, IfOpts}|_]) ->
     case lists:keysearch(addr, 1, IfOpts) of
@@ -761,7 +761,7 @@ get_interface(IpAddress) ->
     {ok, IfAddrs} = inet:getifaddrs(),
     get_interface(IpAddress, IfAddrs).
 
-get_interface(IpAddress, []) ->
+get_interface(_IpAddress, []) ->
     {error, not_found};
 get_interface(IpAddress, [{IfName, IfOpts}|Rest]) ->
     case lists:keysearch(addr, 1, IfOpts) of
