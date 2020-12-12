@@ -555,7 +555,8 @@ convert_value(_ConfigDir, #json_type{name = interface_port,
                 {ok, Address} ->
                     case catch ?l2i(PortString) of
                         Port when is_integer(Port) ->
-                            transform_value(Transform, {Address, Port}, JsonPath);
+                            transform_value(Transform, {Address, Port},
+                                            JsonPath);
                         _ ->
                             throw({not_interface_port, Value, JsonPath})
                     end;
