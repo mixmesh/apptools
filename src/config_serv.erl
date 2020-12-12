@@ -1,5 +1,5 @@
 -module(config_serv).
--export([start_link/4]).
+-export([start_link/5]).
 -export([subscribe/0, subscribe/1, export_config_file/0]).
 -export([json_lookup/2, json_path_to_string/1]).
 -export([tcp_send/3]).
@@ -107,14 +107,20 @@
 -spec start_link(ConfigFilename :: file:filename(),
                  AppSchemas :: [{atom(), schema()}],
                  ReadConfig :: read_config(),
-                 Handler :: fun((gen_tcp:socket()) -> ok)) ->
+                 ListenerHandler :: fun((gen_tcp:socket()) -> ok),
+                 UpgradeHandler ::
+                   fun((binary()) ->
+                              {integer(), integer(), binary() | not_changed} |
+                              downgrade_not_supported)) ->
           serv:spawn_server_result() |
           {config, config_error_reason()}.
 
-start_link(ConfigFilename, AppSchemas, ReadConfig, Handler) ->
+start_link(ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
+           UpgradeHandler) ->
     ?spawn_server_opts(
        fun(Parent) ->
-               init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler)
+               init(Parent, ConfigFilename, AppSchemas, ReadConfig,
+                    ListenerHandler, UpgradeHandler)
        end,
        fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
@@ -892,35 +898,54 @@ json_value_to_string(JsonValue) ->
 %% Server
 %%
 
-init(Parent, ConfigFilename, AppSchemas, ReadConfig, Handler) ->
+init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
+     UpgradeHandler) ->
     ?MODULE = ets:new(?MODULE, [public, named_table]),
-    RunningConfigFilename = ConfigFilename ++ "-running",
-    case filelib:is_regular(RunningConfigFilename) of
-        true ->
-            ok;
-        false ->
-            {ok, _} = file:copy(ConfigFilename, RunningConfigFilename)
-    end,
-    case load_config_file(RunningConfigFilename, AppSchemas) of
-        true ->
-            {IpAddress, Port} = ReadConfig(),
-            TcpServ =
-                proc_lib:spawn_link(
-                  fun() ->
-                          {ok, ListenSocket} =
-                              gen_tcp:listen(Port,
-                                             [{packet, 2},
-                                              {ip, IpAddress},
-                                              binary,
-                                              {reuseaddr, true}]),
-                          listener(ListenSocket, Handler)
-                  end),
-            {ok, #state{parent = Parent,
-                        tcp_serv = TcpServ,
-                        config_filename = RunningConfigFilename,
-                        app_schemas = AppSchemas}};
-        {error, Reason} ->
-            {error, {config, Reason}}
+    DisasterBackupFilename = ConfigFilename ++ "-disaster-backup",
+    {ok, _} = file:copy(ConfigFilename, DisasterBackupFilename),
+    error_logger:info_msg("Copied ~s to ~s",
+                          [ConfigFilename, DisasterBackupFilename]),
+    case UpgradeHandler(ConfigFilename) of
+        downgrade_not_supported ->
+            {error, downgrade_not_supported};
+        {OldRevision, NewRevision, NewConfig} ->
+            case NewConfig of
+                not_changed ->
+                    error_logger:info_msg(
+                      "Config revision unchanged: ~w", [NewRevision]),
+                    ok;
+                _->
+                    error_logger:info_msg(
+                      "Config revision changed: ~w -> ~w",
+                      [OldRevision, NewRevision]),
+                    OldRevisionFilename =
+                        ConfigFilename ++ "-" ++ ?i2l(OldRevision),
+                    {ok, _} = file:copy(ConfigFilename, OldRevisionFilename),
+                    error_logger:info_msg("Moved old revision to ~s",
+                                          [OldRevisionFilename]),
+                    ok = file:write_file(ConfigFilename, NewConfig)
+            end,
+            case load_config_file(ConfigFilename, AppSchemas) of
+                true ->
+                    {IpAddress, Port} = ReadConfig(),
+                    TcpServ =
+                        proc_lib:spawn_link(
+                          fun() ->
+                                  {ok, ListenSocket} =
+                                      gen_tcp:listen(Port,
+                                                     [{packet, 2},
+                                                      {ip, IpAddress},
+                                                      binary,
+                                                      {reuseaddr, true}]),
+                                  listener(ListenSocket, ListenerHandler)
+                          end),
+                    {ok, #state{parent = Parent,
+                                tcp_serv = TcpServ,
+                                config_filename = ConfigFilename,
+                                app_schemas = AppSchemas}};
+                {error, Reason} ->
+                    {error, {config, Reason}}
+            end
     end.
 
 load_config_file(ConfigFilename, AppSchemas) ->
@@ -944,11 +969,11 @@ load_config_file(ConfigFilename, AppSchemas) ->
             {error, {file_error, ConfigFilename, Reason}}
     end.
 
-listener(ListenSocket, Handler) ->
+listener(ListenSocket, ListenerHandler) ->
     {ok, Socket} = gen_tcp:accept(ListenSocket),
-    ok = Handler(Socket),
+    ok = ListenerHandler(Socket),
     ok = gen_tcp:close(Socket),
-    listener(ListenSocket, Handler).
+    listener(ListenSocket, ListenerHandler).
 
 message_handler(#state{parent = Parent,
                        tcp_serv = TcpServ,
