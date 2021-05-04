@@ -110,8 +110,11 @@
                  ListenerHandler :: fun((gen_tcp:socket()) -> ok),
                  UpgradeHandler ::
                    fun((binary()) ->
-                              {integer(), integer(), binary() | not_changed} |
-                              downgrade_not_supported)) ->
+                              {ok, {integer(),
+                                    integer(),
+                                    binary() | not_changed}} |
+                              {error, downgrade_not_supported |
+                                      {bad_json, term()}})) ->
           serv:spawn_server_result() |
           {config, config_error_reason()}.
 
@@ -897,7 +900,7 @@ format_error({config, {invalid_transform_value, JsonPath, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
 format_error(UnknownReason) ->
     error_logger:error_report(
-      {?MODULE, ?LINE, {unknown_message, UnknownReason}}),
+      {?MODULE, ?LINE, {unknown_reason, UnknownReason}}),
     <<"Internal error">>.
 
 json_value_to_string(JsonValue) when is_binary(JsonValue) ->
@@ -917,9 +920,7 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
     error_logger:info_msg("Copied ~s to ~s",
                           [ConfigFilename, DisasterBackupFilename]),
     case UpgradeHandler(ConfigFilename) of
-        downgrade_not_supported ->
-            {error, downgrade_not_supported};
-        {OldRevision, NewRevision, NewConfig} ->
+        {ok, {OldRevision, NewRevision, NewConfig}} ->
             case NewConfig of
                 not_changed ->
                     error_logger:info_msg(
@@ -954,7 +955,9 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
                                 app_schemas = AppSchemas}};
                 {error, Reason} ->
                     {error, {config, Reason}}
-            end
+            end;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 load_config_file(ConfigFilename, AppSchemas) ->
