@@ -51,8 +51,13 @@ start_link(ReadConfig) ->
 -spec is_log_enabled(daemon | dbg | error) -> boolean().
 
 is_log_enabled(LogType) ->
-    [{LogType, Enabled}] = ets:lookup(?MODULE, LogType),
-    Enabled.
+    try ets:lookup(?MODULE, LogType) of
+	[{LogType, Enabled}] ->
+	    Enabled
+    catch
+	error:badarg ->
+	    false
+    end.
 
 %% Exported: daemon_log
 
