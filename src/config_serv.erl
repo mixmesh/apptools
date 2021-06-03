@@ -252,7 +252,9 @@ lookup_schema([{_App, [{_Name, _JsonType}|_]} = AppSchema|Rest],
               MismatchedAppSchemas) ->
     lookup_schema(Rest, JsonTerm, [AppSchema|MismatchedAppSchemas]).
 
+%%
 %% Exported: convert
+%%
 
 convert(ConfigDir, Schema, JsonTerm, Lazy) ->
     convert(ConfigDir, Schema, JsonTerm, Lazy, [], []).
@@ -342,6 +344,11 @@ convert(_ConfigDir,
         [{AnotherName, _NestedJsonTerm}|_JsonTermRest], false, JsonPath,
         _ConvertedJsonTerm) ->
     throw({expected, [Name|JsonPath], [AnotherName|JsonPath]});
+convert(_ConfigDir,
+        [{Name, _NestedSchema}|_SchemaRest],
+        [], false, JsonPath,
+        _ConvertedJsonTerm) ->
+    throw({expected, [Name|JsonPath]});
 convert(ConfigDir,
         [{_Name, _NestedSchema}|SchemaRest],
         [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
@@ -812,6 +819,9 @@ format_error({config, {missing, Name}}) ->
     ?l2b(io_lib:format("\"~s\" is missing", [Name]));
 format_error({config, {unexpected, Name}}) ->
     ?l2b(io_lib:format("\"~s\" was not expected", [Name]));
+format_error({config, {expected, ExpectedJsonPath}}) ->
+    ?l2b(io_lib:format("Expected \"~s\"",
+                       [json_path_to_string(ExpectedJsonPath)]));
 format_error({config, {expected, ExpectedJsonPath, JsonPath}}) ->
     ?l2b(io_lib:format("Expected \"~s\", got \"~s\"",
                        [json_path_to_string(ExpectedJsonPath),
