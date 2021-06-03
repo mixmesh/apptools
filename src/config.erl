@@ -1,7 +1,9 @@
 -module(config).
 -export([lookup/1, lookup/2, lookup_children/2]).
 
+%%
 %% Exported: lookup
+%%
 
 -spec lookup(config_serv:json_path()) -> any().
 
@@ -26,7 +28,9 @@ lookup([Name|_] = JsonPath, DefaultValue) ->
             DefaultValue
     end.
 
+%%
 %% Exported: lookup_children
+%%
 
 -spec lookup_children(config_serv:json_path(), any()) -> [any()].
 

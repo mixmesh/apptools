@@ -35,7 +35,9 @@
         fun(() -> {#daemon_log_info{}, #dbg_log_info{}, #error_log_info{}}).
 -type error_reason() :: already_started | term().
 
+%%
 %% Exported: start_link
+%%
 
 -spec start_link(read_config()) ->
           serv:spawn_server_result() | {error, error_reason()}.
@@ -46,7 +48,9 @@ start_link(ReadConfig) ->
        fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
 
+%%
 %% Exported: is_log_enabled
+%%
 
 -spec is_log_enabled(daemon | dbg | error) -> boolean().
 
@@ -59,7 +63,9 @@ is_log_enabled(LogType) ->
 	    false
     end.
 
+%%
 %% Exported: daemon_log
+%%
 
 -spec daemon_log(pid(), atom(), tag_or_tags(), integer(), string(),
                  [any()]) ->
@@ -69,14 +75,18 @@ daemon_log(Pid, Module, TagOrTags, Line, Format, Args) ->
     serv:cast(?MODULE, {daemon_log, Pid, Module, TagOrTags, Line, Format,
                         Args}).
 
+%%
 %% Exported: dbg_log
+%%
 
 -spec dbg_log(pid(), atom(), tag_or_tags(), Line :: integer(), term()) -> ok.
 
 dbg_log(Pid, Module, TagOrTags, Line, Term) ->
     serv:cast(?MODULE, {dbg_log, Pid, Module, TagOrTags, Line, Term}).
 
+%%
 %% Exported: add_daemon_show
+%%
 
 -spec add_daemon_show(filter_tag_or_tags()) -> filter_tags().
 
@@ -92,56 +102,72 @@ update_filter(Op, LogType, ShowOrHide, FilterTag) ->
       ?MODULE,
       {update_filter, Op, LogType, ShowOrHide, [lookup_pid(FilterTag)]}).
 
+%%
 %% Exported: remove_daemon_show
+%%
 
 -spec remove_daemon_show(filter_tag_or_tags()) -> filter_tags().
 
 remove_daemon_show(FilterTags) ->
     update_filter(remove, daemon, show, FilterTags).
 
+%%
 %% Exported: add_daemon_hide
+%%
 
 -spec add_daemon_hide(filter_tag_or_tags()) -> filter_tags().
 
 add_daemon_hide(FilterTags) ->
     update_filter(add, daemon, hide, FilterTags).
 
+%%
 %% Exported: remove_daemon_hide
+%%
 
 -spec remove_daemon_hide(filter_tag_or_tags()) -> filter_tags().
 
 remove_daemon_hide(FilterTags) ->
     update_filter(remove, daemon, hide, FilterTags).
 
+%%
 %% Exported: add_dbg_show
+%%
 
 -spec add_dbg_show(filter_tag_or_tags()) -> filter_tags().
 
 add_dbg_show(FilterTags) ->
     update_filter(add, dbg, show, FilterTags).
 
+%%
 %% Exported: remove_dbg_show
+%%
 
 -spec remove_dbg_show(filter_tag_or_tags()) -> filter_tags().
 
 remove_dbg_show(FilterTags) ->
     update_filter(remove, dbg, show, FilterTags).
 
+%%
 %% Exported: add_dbg_hide
+%%
 
 -spec add_dbg_hide(filter_tag_or_tags()) -> filter_tags().
 
 add_dbg_hide(FilterTags) ->
     update_filter(add, dbg, hide, FilterTags).
 
+%%
 %% Exported: remove_dbg_hide
+%%
 
 -spec remove_dbg_hide(filter_tag_or_tags()) -> filter_tags().
 
 remove_dbg_hide(FilterTags) ->
     update_filter(remove, dbg, hide, FilterTags).
 
+%%
 %% Exported: format_error
+%%
 
 -spec format_error(error_reason()) -> iolist().
 

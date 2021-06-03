@@ -17,7 +17,9 @@
 -type name() :: atom() | pid().
 -type spawn_server_result() :: {ok, pid()} | {error, any()}.
 
+%%
 %% Exported: spawn_server
+%%
 
 -spec spawn_server(atom(), any(), function(), #serv_options{}) ->
           spawn_server_result().
@@ -113,7 +115,9 @@ loop(MessageHandler, State) ->
             throw({unknown_message, UnknownMessage})
     end.
 
+%%
 %% Exported: cast
+%%
 
 -spec cast(serv:name(), any()) -> ok.
 
@@ -130,7 +134,9 @@ cast(To, Request) ->
             ok
     end.
 
+%%
 %% Exported: call
+%%
 
 -spec call(serv:name(), any(), integer() | infinity) ->
                   any() | {error, timeout}.
@@ -165,7 +171,9 @@ call(To, Request, Timeout) ->
             {error, timeout}
     end.
 
+%%
 %% Exported: reply
+%%
 
 -spec reply({pid(), reference()}, any()) -> ok.
 
@@ -173,7 +181,9 @@ reply({Pid, Ref}, Reply) ->
     Pid ! {reply, Ref, Reply},
     ok.
 
+%%
 %% Exported: l
+%%
 
 l(Module) ->
     case c:l(Module) of
@@ -205,12 +215,16 @@ trigger_serv_processes(Module, [Pid|Rest]) ->
             trigger_serv_processes(Module, Rest)
     end.
 
+%%
 %% Exported: lm
+%%
 
 lm() ->
     [l(Module) || Module <- code:modified_modules()].
 
+%%
 %% Exported: system_code_changed
+%%
 
 system_code_change(State, ModuleName, OldVersion, Extra) ->
     case get_options() of
@@ -220,7 +234,9 @@ system_code_change(State, ModuleName, OldVersion, Extra) ->
             SystemCodeChange(State, ModuleName, OldVersion, Extra)
     end.
 
+%%
 %% Exported: system_continue
+%%
 
 system_continue(Parent, DebugOptions, State) ->
     case get_options() of
@@ -233,7 +249,9 @@ system_continue(Parent, DebugOptions, State) ->
             ?MODULE:loop(MessageHandler, NewState)
     end.
 
+%%
 %% Exported: system_get_state
+%%
 
 system_get_state(State) ->
     case get_options() of
@@ -243,7 +261,9 @@ system_get_state(State) ->
             SystemGetState(State)
     end.
 
+%%
 %% Exported: system_replace_state
+%%
 
 system_replace_state(StateFun, State) ->
     case get_options() of
@@ -254,7 +274,9 @@ system_replace_state(StateFun, State) ->
             SystemReplaceState(StateFun, State)
     end.
 
+%%
 %% Exported: system_terminate
+%%
 
 system_terminate(Reason, Parent, DebugOptions, State) ->
     case get_options() of
@@ -264,7 +286,9 @@ system_terminate(Reason, Parent, DebugOptions, State) ->
             SystemTerminate(Reason, Parent, DebugOptions, State)
     end.
 
+%%
 %% Exported: write_debug
+%%
 
 write_debug(Device, Event, Name)  ->
     case get_options() of

@@ -1,7 +1,9 @@
 -module(supervisor_helper).
 -export([foreach_worker/2, get_selected_worker_pids/2]).
 
+%%
 %% Exported: foreach_worker
+%%
 
 foreach_worker(SupervisorPid, Do) ->
     Workers =
@@ -18,7 +20,9 @@ foreach_worker(Do, Workers, [{Id, Pid}|Rest]) ->
     Do(Id, Pid, Workers),
     foreach_worker(Do, Workers, Rest).
 
+%%
 %% Exported: get_selected_worker_pids
+%%
 
 get_selected_worker_pids([], _NeighbourWorkers) ->
     [];

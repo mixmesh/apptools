@@ -102,7 +102,9 @@
 
 -type read_config() :: fun(() -> ip4_address_port()).
 
+%%
 %% Exported: start_link
+%%
 
 -spec start_link(ConfigFilename :: file:filename(),
                  AppSchemas :: [{atom(), schema()}],
@@ -128,7 +130,9 @@ start_link(ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
        fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
 
+%%
 %% Exported: subscribe
+%%
 
 -spec subscribe(pid()) -> ok.
 
@@ -138,14 +142,18 @@ subscribe() ->
 subscribe(Pid) ->
     serv:cast(?MODULE, {subscribe, Pid}).
 
+%%
 %% Exported: export_config_file
+%%
 
 -spec export_config_file() -> ok.
 
 export_config_file() ->
     serv:call(?MODULE, export_config_file).
 
+%%
 %% Exported: json_lookup
+%%
 
 json_lookup(JsonTerm, []) ->
     JsonTerm;
@@ -178,7 +186,9 @@ json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
             json_lookup_instance(Rest, {KeyName, Value})
     end.
 
+%%
 %% Exported: json_path_to_string
+%%
 
 json_path_to_string([Name|Rest]) ->
     json_path_to_string(Rest, [?a2l(Name)]).
@@ -188,7 +198,9 @@ json_path_to_string([], Acc) ->
 json_path_to_string([Name|Rest], Acc) ->
     json_path_to_string(Rest, [?a2l(Name), $/|Acc]).
 
+%%
 %% Exported: tcp_send
+%%
 
 -spec tcp_send(inet:ip_address(), inet:port_number(), Message :: binary()) ->
           ok | {error, {posix, inet:posix()}}.
@@ -203,7 +215,9 @@ tcp_send(Address, Port, Message) ->
             {error, {posix, Reason}}
     end.
 
+%%
 %% Exported: atomify
+%%
 
 atomify([]) ->
     [];
@@ -237,7 +251,9 @@ load_json_term(ConfigDir, AppSchemas, JsonTerm) ->
                            RemainingJsonTerm)
     end.
 
+%%
 %% Exported: lookup_schema
+%%
 
 lookup_schema(AppSchemas, JsonTerm) ->
     lookup_schema(AppSchemas, JsonTerm, []).
@@ -733,14 +749,18 @@ get_ip_address(IfName, [{IfName, IfOpts}|_]) ->
 get_ip_address(IfName, [_|Rest]) ->
     get_ip_address(IfName, Rest).
 
+%%
 %% Exported: unconvert_values
+%%
 
 unconvert_values( _JsonType, []) ->
     [];
 unconvert_values(JsonType, [JsonValue|Rest]) ->
     [unconvert_value(JsonType, JsonValue)|unconvert_values(JsonType, Rest)].
 
+%%
 %% Exported: unconvert_value
+%%
 
 unconvert_value(#json_type{untransform = Untransform} = JsonType, Value)
   when Untransform /= undefined ->
@@ -798,7 +818,9 @@ get_interface(IpAddress, [{IfName, IfOpts}|Rest]) ->
             get_interface(IpAddress, Rest)
     end.
 
+%%
 %% Exported: format_error
+%%
 
 -spec format_error(error_reason()) -> binary().
 
