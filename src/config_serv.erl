@@ -32,7 +32,7 @@
         ip4_address_port |
         ip6_address |
         ip6_address_port |
-        hostname_port |       
+        hostname_port |
         interface_port |
         base64 |
         readable_file |
@@ -122,7 +122,7 @@
 
 start_link(ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
            UpgradeHandler) ->
-    ?spawn_server_opts(
+    ?spawn_server(
        fun(Parent) ->
                init(Parent, ConfigFilename, AppSchemas, ReadConfig,
                     ListenerHandler, UpgradeHandler)
@@ -1065,7 +1065,7 @@ message_handler(#state{parent = Parent,
             noreply
     end.
 
-replace_config_file(ConfigFilename, AppSchemas) ->            
+replace_config_file(ConfigFilename, AppSchemas) ->
     JsonTerm = unconvert(AppSchemas),
     {ok, Binary} =
         jsone:try_encode(JsonTerm,

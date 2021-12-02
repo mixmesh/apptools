@@ -43,7 +43,7 @@
           serv:spawn_server_result() | {error, error_reason()}.
 
 start_link(ReadConfig) ->
-    ?spawn_server_opts(
+    ?spawn_server(
        fun(Parent) -> init(Parent, ReadConfig, tty_available()) end,
        fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
