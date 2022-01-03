@@ -45,3 +45,14 @@ lookup_children(Keys, [{Key, Value}|Rest]) ->
         false ->
             lookup_children(Keys, Rest)
     end.
+
+%%
+%% Exported: insert
+%%
+
+%% -spec insert(config_serv:json_path(), any()).
+
+%% insert([Name|_] = JsonPath, Value) ->
+%%     [{_, App}] = ets:lookup(config_serv, Name),
+%%     {ok, JsonTerm} = application:get_env(App, Name),
+%%     config_serv:json_insert(JsonTerm, JsonPath, Value).
