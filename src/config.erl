@@ -1,5 +1,5 @@
 -module(config).
--export([lookup/1, lookup/2, lookup_children/2]).
+-export([lookup/1, lookup/2, lookup_children/2, edit_config/1]).
 
 %%
 %% Exported: lookup
@@ -47,12 +47,11 @@ lookup_children(Keys, [{Key, Value}|Rest]) ->
     end.
 
 %%
-%% Exported: insert
+%% Exported: edit_config
 %%
 
-%% -spec insert(config_serv:json_path(), any()).
+-spec edit_config(jsone:json_term()) ->
+          ok | {error, config_serv:error_reason()}.
 
-%% insert([Name|_] = JsonPath, Value) ->
-%%     [{_, App}] = ets:lookup(config_serv, Name),
-%%     {ok, JsonTerm} = application:get_env(App, Name),
-%%     config_serv:json_insert(JsonTerm, JsonPath, Value).
+edit_config(JsonTerm) ->
+    config_serv:edit_config(JsonTerm).

@@ -1,7 +1,7 @@
 -module(config_serv).
 -export([start_link/6]).
 -export([subscribe/0, subscribe/1, export_config_file/0]).
--export([json_lookup/2, json_path_to_string/1]).
+-export([json_lookup/2, edit_config/1, json_path_to_string/1]).
 -export([tcp_send/3]).
 -export([atomify/1, lookup_schema/2, convert/4]).
 -export([unconvert_values/2, unconvert_value/2]).
@@ -194,6 +194,16 @@ json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
         false ->
             json_lookup_instance(Rest, {KeyName, Value})
     end.
+
+%%
+%% Exported: edit_config
+%%
+
+-spec edit_config(jsone:json_term()) ->
+          ok | {error, config_serv:error_reason()}.
+
+edit_config(JsonTerm) ->
+    serv:call(?MODULE, {edit_config, JsonTerm}).
 
 %%
 %% Exported: json_path_to_string
@@ -1068,6 +1078,16 @@ message_handler(#state{parent = Parent,
         {call, From, export_config_file} ->
             ok = replace_config_file(ConfigFilename, AppSchemas),
             {reply, From, ok};
+        {call, From, {edit_config, JsonTerm}} ->
+            try
+                ok = edit_config(JsonTerm, AppSchemas),
+                ok = replace_config_file(ConfigFilename, AppSchemas),
+                self() ! reload,
+                {reply, From, ok}
+            catch
+                throw:Reason ->
+                    {reply, From, {error, {config, Reason}}}
+            end;
         {'DOWN', _MonitorRef, process, ClientPid, _Info} ->
             UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
             {noreply, S#state{subscribers = UpdatedSubscribers}};
@@ -1140,8 +1160,39 @@ unconvert([{Name, NestedSchema}|SchemaRest],
     unconvert(SchemaRest, JsonTermRest,
               [{Name, UnconvertedNestedJsonTerm}|UnconvertedJsonTerm]);
 %% List
+unconvert([Schema|_SchemaRest], [], UnconvertedJsonTerm)
+  when is_list(Schema) ->
+    lists:reverse(UnconvertedJsonTerm);
 unconvert([Schema|SchemaRest], [JsonTerm|JsonTermRest], UnconvertedJsonTerm)
   when is_list(Schema), is_list(JsonTerm) ->
     UnconvertedFirstJsonTerm = unconvert(Schema, JsonTerm),
     unconvert([Schema|SchemaRest], JsonTermRest,
-              UnconvertedFirstJsonTerm ++ UnconvertedJsonTerm).
+              [UnconvertedFirstJsonTerm|UnconvertedJsonTerm]).
+
+edit_config(JsonTerm, AppSchemas) ->
+    {App, FirstNameInJsonPath, Schema, RemainingAppSchemas} =
+        lookup_schema(AppSchemas, JsonTerm),
+    case convert(<<"/tmp">>, Schema, JsonTerm, true) of
+        {NewJsonTerm, []} ->
+            {ok, OldJsonTerm} = application:get_env(App, FirstNameInJsonPath),
+            MergedJsonTerm = edit_config_merge(OldJsonTerm, NewJsonTerm),
+            application:set_env(App, FirstNameInJsonPath, MergedJsonTerm);
+        {NewJsonTerm, RemainingJsonTerm} ->
+            {ok, OldJsonTerm} = application:get_env(App, FirstNameInJsonPath),
+            MergedJsonTerm = edit_config_merge(OldJsonTerm, NewJsonTerm),
+            ok = application:set_env(App, FirstNameInJsonPath, MergedJsonTerm),
+            edit_config(RemainingJsonTerm, RemainingAppSchemas)
+    end.
+
+edit_config_merge([], _NewJsonTerm) ->
+    [];
+edit_config_merge([{Name, OldValue}|OldJsonTerm],
+                  [{Name, NewValue}|NewJsonTerm])
+  when is_list(OldValue) ->
+    [{Name, edit_config_merge(OldValue, NewValue)}|
+     edit_config_merge(OldJsonTerm, NewJsonTerm)];
+edit_config_merge([{Name, _OldValue}|OldJsonTerm],
+                  [{Name, NewValue}|NewJsonTerm]) ->
+    [{Name, NewValue}|edit_config_merge(OldJsonTerm, NewJsonTerm)];
+edit_config_merge([{Name, OldValue}|OldJsonTerm], NewJsonTerm) ->
+    [{Name, OldValue}|edit_config_merge(OldJsonTerm, NewJsonTerm)].
