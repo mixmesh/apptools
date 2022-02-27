@@ -199,7 +199,7 @@ json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
 %% Exported: edit_config
 %%
 
--spec edit_config(jsone:json_term()) ->
+-spec edit_config(jsone:json_value()) ->
           ok | {error, config_serv:error_reason()}.
 
 edit_config(JsonTerm) ->
@@ -1186,6 +1186,19 @@ edit_config(JsonTerm, AppSchemas) ->
 
 edit_config_merge([], _NewJsonTerm) ->
     [];
+edit_config_merge([OldObjectArray|Rest], [])
+  when is_list(OldObjectArray) ->
+    [OldObjectArray|Rest];
+edit_config_merge([OldObjectArray|OldJsonTerm],
+                  [[{Name, Value}|Rest] = NewObjectArray|NewJsonTerm])
+  when is_list(OldObjectArray) ->
+    case lists:keysearch(Name, 1, OldObjectArray) of
+        {value, {_, Value}} ->
+            [edit_config_merge(OldObjectArray, NewObjectArray)|
+             edit_config_merge(OldJsonTerm, NewJsonTerm)];
+        {value, {_, _}} ->
+            [OldObjectArray|edit_config_merge(OldJsonTerm, NewJsonTerm)]
+    end;
 edit_config_merge([{Name, OldValue}|OldJsonTerm],
                   [{Name, NewValue}|NewJsonTerm])
   when is_list(OldValue) ->

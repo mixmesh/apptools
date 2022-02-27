@@ -50,7 +50,7 @@ lookup_children(Keys, [{Key, Value}|Rest]) ->
 %% Exported: edit_config
 %%
 
--spec edit_config(jsone:json_term()) ->
+-spec edit_config(jsone:json_value()) ->
           ok | {error, config_serv:error_reason()}.
 
 edit_config(JsonTerm) ->
