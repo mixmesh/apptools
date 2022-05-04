@@ -17,6 +17,9 @@
 -type name() :: atom() | pid().
 -type spawn_server_result() :: {ok, pid()} | {error, any()}.
 
+-define(CHECK_EXECUTION_TIME, true).
+-define(EXECUTION_TIMEOUT, 100).
+
 %%
 %% Exported: spawn_server
 %%
@@ -41,7 +44,15 @@ spawn_server(ModuleName, InitState, MessageHandler,
 
 init(ModuleName, InitState, MessageHandler,
      #serv_options{name = Name, trap_exit = TrapExit} = Options, Parent) ->
-    true = put_options(Options, ModuleName, Parent, MessageHandler),
+    ExecutionTimer =
+        erlang:start_timer(24 * 3600 * 1000, self(), execution_timer_stopped),
+    ExecutionTimeLeft = erlang:read_timer(ExecutionTimer),
+    ok = put_options(Options#serv_options{
+                       module_name = ModuleName,
+                       parent = Parent,
+                       message_handler = MessageHandler,
+                       execution_timer = ExecutionTimer,
+                       execution_time_left = ExecutionTimeLeft}),
     true = register_server(Name),
     case TrapExit of
         true ->
@@ -63,11 +74,9 @@ init(ModuleName, InitState, MessageHandler,
             loop(MessageHandler, InitState)
     end.
 
-put_options(Options, ModuleName, Parent, MessageHandler) ->
-    undefined == put(serv_options,
-                     Options#serv_options{module_name = ModuleName,
-                                          parent = Parent,
-                                          message_handler = MessageHandler}).
+put_options(Options) ->
+    _ = put(serv_options, Options),
+    ok.
 
 get_options() ->
     get(serv_options).
@@ -83,6 +92,7 @@ register_server(Name) ->
     end.
 
 loop(MessageHandler, State) ->
+    check_execution_time(),
     case MessageHandler(State) of
         stop ->
             stopped;
@@ -114,6 +124,32 @@ loop(MessageHandler, State) ->
         UnknownMessage ->
             throw({unknown_message, UnknownMessage})
     end.
+
+-ifdef(CHECK_EXECUTION_TIME).
+check_execution_time() ->
+    ServOptions = get_options(),
+    #serv_options{execution_timer = ExecutionTimer,
+                  execution_time_left = ExecutionTimeLeft} =
+        ServOptions,
+    CurrentExecutionTimeLeft = erlang:read_timer(ExecutionTimer),
+    ExecutionTimeElapsed = ExecutionTimeLeft - CurrentExecutionTimeLeft,
+    if
+        ExecutionTimeElapsed > ?EXECUTION_TIMEOUT ->
+            io:format(standard_error,
+                      "**** EXECUTION TIMEOUT: ~w > ~w for process ~w (~w)\n",
+                      [ExecutionTimeElapsed,
+                       ?EXECUTION_TIMEOUT,
+                       ServOptions#serv_options.module_name,
+                       ServOptions#serv_options.name]);
+        true ->
+            ok
+    end,
+    ok = put_options(ServOptions#serv_options{
+                       execution_time_left = CurrentExecutionTimeLeft}).
+-else.
+check_execution_time() ->
+    ok.
+-endif.
 
 %%
 %% Exported: cast
