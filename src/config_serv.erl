@@ -1,7 +1,7 @@
 -module(config_serv).
--export([start_link/5]).
+-export([start_link/6]).
 -export([subscribe/0, subscribe/1, export_config_file/0]).
--export([json_lookup/2, json_path_to_string/1]).
+-export([json_lookup/2, edit_config/1, json_path_to_string/1]).
 -export([tcp_send/3]).
 -export([atomify/1, lookup_schema/2, convert/4]).
 -export([unconvert_values/2, unconvert_value/2]).
@@ -20,7 +20,9 @@
          tcp_serv :: pid(),
          config_filename :: file:filename(),
          app_schemas :: [{atom(), schema()}],
-         subscribers = [] :: [pid()]}).
+         subscribers = [] :: [pid()],
+         post_process_fun :: undefined | post_process_fun()
+}).
 
 -type type_name() ::
         bool |
@@ -98,9 +100,14 @@
         {not_atom, json_value(), json_path()} |
         {not_string, json_value(), json_path()} |
         {invalid_value, json_value(), json_path()} |
-        {invalid_transform_value, json_path(), string()}.
+        {invalid_transform_value, json_path(), string()} |
+        {post_processing_failed, json_path(), Reason :: binary()}.
 
 -type read_config() :: fun(() -> ip4_address_port()).
+
+-type post_process_fun() ::
+        fun((term()) -> {ok, term()} |
+                        {error, json_path(), Reason :: binary()}).
 
 %%
 %% Exported: start_link
@@ -115,17 +122,19 @@
                               {ok, {integer(),
                                     integer(),
                                     binary() | not_changed}} |
-                              {error, downgrade_not_supported |
-                                      {bad_json, term()}})) ->
+                              {error,
+                               downgrade_not_supported |
+                               {bad_json, term()}}),
+                 PostProcessFun :: undefined | post_process_fun()) ->
           serv:spawn_server_result() |
           {config, config_error_reason()}.
 
 start_link(ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
-           UpgradeHandler) ->
+           UpgradeHandler, PostProcessFun) ->
     ?spawn_server(
        fun(Parent) ->
                init(Parent, ConfigFilename, AppSchemas, ReadConfig,
-                    ListenerHandler, UpgradeHandler)
+                    ListenerHandler, UpgradeHandler, PostProcessFun)
        end,
        fun ?MODULE:message_handler/1,
        #serv_options{name = ?MODULE}).
@@ -185,6 +194,16 @@ json_lookup_instance([JsonTermInstance|Rest], {KeyName, Value}) ->
         false ->
             json_lookup_instance(Rest, {KeyName, Value})
     end.
+
+%%
+%% Exported: edit_config
+%%
+
+-spec edit_config(jsone:json_value()) ->
+          ok | {error, config_serv:error_reason()}.
+
+edit_config(JsonTerm) ->
+    serv:call(?MODULE, {edit_config, JsonTerm}).
 
 %%
 %% Exported: json_path_to_string
@@ -374,6 +393,12 @@ convert(ConfigDir,
             [{AnotherName, NestedJsonTerm}|JsonTermRest], true, JsonPath,
             ConvertedJsonTerm);
 %% List
+convert(_ConfigDir,
+        [Schema|_SchemaRest],
+        [], _Lazy, _JsonPath,
+        ConvertedJsonTerm)
+  when is_list(Schema) ->
+    {lists:reverse(ConvertedJsonTerm), []};
 convert(ConfigDir,
         [Schema|SchemaRest],
         [JsonTerm|JsonTermRest], Lazy, JsonPath,
@@ -382,7 +407,7 @@ convert(ConfigDir,
     {ConvertedFirstJsonTerm, []} =
         convert(ConfigDir, Schema, JsonTerm, Lazy, JsonPath, []),
     convert(ConfigDir, [Schema|SchemaRest], JsonTermRest, Lazy, JsonPath,
-            ConvertedFirstJsonTerm ++ ConvertedJsonTerm).
+            [ConvertedFirstJsonTerm|ConvertedJsonTerm]).
 
 %% bool
 convert_value(_ConfigDir, #json_type{name = bool, transform = Transform}, Value,
@@ -828,9 +853,11 @@ format_error(already_started) ->
     <<"Already started">>;
 format_error({posix, Reason}) ->
     ?l2b(inet:format_error(Reason));
-format_error({config, {bad_json, Reason}}) ->
-    %%    <<"Syntax error">>;
-    ?l2b(io_lib:format("Bad JSON: ~p", [Reason]));
+format_error({config, {bad_json,
+                       {badarg, [{jsone_decode, object_next, [Here|_], _}]}}}) ->
+    ?l2b(io_lib:format("Invalid JSON: ~s", [Here]));
+format_error({config, {bad_json, _Reason}}) ->
+    <<"Invalid JSON">>;
 format_error({config, {file_error, Filename, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [Filename, file:format_error(Reason)]));
 format_error({config, {file_error, Filename, Reason, JsonPath}}) ->
@@ -930,6 +957,8 @@ format_error({config, {invalid_value, Value, JsonPath}}) ->
                         json_value_to_string(Value)]));
 format_error({config, {invalid_transform_value, JsonPath, Reason}}) ->
     ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
+format_error({config, {post_processing_failed, JsonPath, Reason}}) ->
+    ?l2b(io_lib:format("~s: ~s", [json_path_to_string(JsonPath), Reason]));
 format_error(UnknownReason) ->
     error_logger:error_report(
       {?MODULE, ?LINE, {unknown_reason, UnknownReason}}),
@@ -945,7 +974,7 @@ json_value_to_string(JsonValue) ->
 %%
 
 init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
-     UpgradeHandler) ->
+     UpgradeHandler, PostProcessFun) ->
     ?MODULE = ets:new(?MODULE, [public, named_table]),
     DisasterBackupFilename = ConfigFilename ++ "-disaster-backup",
     {ok, _} = file:copy(ConfigFilename, DisasterBackupFilename),
@@ -969,7 +998,7 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
                                           [OldRevisionFilename]),
                     ok = file:write_file(ConfigFilename, NewConfig)
             end,
-            case load_config_file(ConfigFilename, AppSchemas) of
+            case load_config_file(ConfigFilename, AppSchemas, PostProcessFun) of
                 true ->
                     {IpAddress, Port} = ReadConfig(),
                     TcpServ =
@@ -984,7 +1013,8 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
                     {ok, #state{parent = Parent,
                                 tcp_serv = TcpServ,
                                 config_filename = ConfigFilename,
-                                app_schemas = AppSchemas}};
+                                app_schemas = AppSchemas,
+                                post_process_fun = PostProcessFun}};
                 {error, Reason} ->
                     {error, {config, Reason}}
             end;
@@ -992,16 +1022,17 @@ init(Parent, ConfigFilename, AppSchemas, ReadConfig, ListenerHandler,
             {error, Reason}
     end.
 
-load_config_file(ConfigFilename, AppSchemas) ->
+load_config_file(ConfigFilename, AppSchemas, PostProcessFun) ->
     case file:read_file(ConfigFilename) of
         {ok, EncodedJson} ->
             case jsone:try_decode(EncodedJson, [{object_format, proplist}]) of
                 {ok, JsonTerm, _} ->
                     try
+                        PostProcessedJsonTerm =
+                            post_process(PostProcessFun, atomify(JsonTerm)),
                         ConfigDir = filename:dirname(ConfigFilename),
-                        AtomifiedJsonTerm = atomify(JsonTerm),
-                        load_json_term(
-                          ConfigDir, AppSchemas, AtomifiedJsonTerm)
+                        load_json_term(ConfigDir, AppSchemas,
+                                       PostProcessedJsonTerm)
                     catch
                         throw:Reason ->
                             {error, Reason}
@@ -1011,6 +1042,16 @@ load_config_file(ConfigFilename, AppSchemas) ->
             end;
         {error, Reason} ->
             {error, {file_error, ConfigFilename, Reason}}
+    end.
+
+post_process(undefined, JsonTerm) ->
+    JsonTerm;
+post_process(Fun, JsonTerm) ->
+    case Fun(JsonTerm) of
+        {ok, ProcessedJsonTerm} ->
+            ProcessedJsonTerm;
+        {error, JsonPath, ReasonString} ->
+            throw({post_processing_failed, JsonPath, ReasonString})
     end.
 
 listener(ListenSocket, ListenerHandler) ->
@@ -1023,7 +1064,8 @@ message_handler(#state{parent = Parent,
                        tcp_serv = TcpServ,
                        config_filename = ConfigFilename,
                        app_schemas = AppSchemas,
-                       subscribers = Subscribers} = S) ->
+                       subscribers = Subscribers,
+                       post_process_fun = PostProcessFun} = S) ->
     receive
         {cast, {subscribe, ClientPid}} ->
             case lists:member(ClientPid, Subscribers) of
@@ -1036,13 +1078,23 @@ message_handler(#state{parent = Parent,
         {call, From, export_config_file} ->
             ok = replace_config_file(ConfigFilename, AppSchemas),
             {reply, From, ok};
+        {call, From, {edit_config, JsonTerm}} ->
+            try
+                ok = edit_config(JsonTerm, AppSchemas),
+                ok = replace_config_file(ConfigFilename, AppSchemas),
+                self() ! reload,
+                {reply, From, ok}
+            catch
+                throw:Reason ->
+                    {reply, From, {error, {config, Reason}}}
+            end;
         {'DOWN', _MonitorRef, process, ClientPid, _Info} ->
             UpdatedSubscribers = lists:delete(ClientPid, Subscribers),
             {noreply, S#state{subscribers = UpdatedSubscribers}};
         reload ->
 	    %% Ensure that reload is called in all applications
 	    EnvBefore = application_controller:prep_config_change(),
-            case load_config_file(ConfigFilename, AppSchemas) of
+            case load_config_file(ConfigFilename, AppSchemas, PostProcessFun) of
                 true ->
                     ok = application_controller:config_change(EnvBefore),
                     %% Inform all subscribers
@@ -1108,8 +1160,52 @@ unconvert([{Name, NestedSchema}|SchemaRest],
     unconvert(SchemaRest, JsonTermRest,
               [{Name, UnconvertedNestedJsonTerm}|UnconvertedJsonTerm]);
 %% List
+unconvert([Schema|_SchemaRest], [], UnconvertedJsonTerm)
+  when is_list(Schema) ->
+    lists:reverse(UnconvertedJsonTerm);
 unconvert([Schema|SchemaRest], [JsonTerm|JsonTermRest], UnconvertedJsonTerm)
   when is_list(Schema), is_list(JsonTerm) ->
     UnconvertedFirstJsonTerm = unconvert(Schema, JsonTerm),
     unconvert([Schema|SchemaRest], JsonTermRest,
-              UnconvertedFirstJsonTerm ++ UnconvertedJsonTerm).
+              [UnconvertedFirstJsonTerm|UnconvertedJsonTerm]).
+
+edit_config(JsonTerm, AppSchemas) ->
+    {App, FirstNameInJsonPath, Schema, RemainingAppSchemas} =
+        lookup_schema(AppSchemas, JsonTerm),
+    case convert(<<"/tmp">>, Schema, JsonTerm, true) of
+        {NewJsonTerm, []} ->
+            {ok, OldJsonTerm} = application:get_env(App, FirstNameInJsonPath),
+            MergedJsonTerm = edit_config_merge(OldJsonTerm, NewJsonTerm),
+            application:set_env(App, FirstNameInJsonPath, MergedJsonTerm);
+        {NewJsonTerm, RemainingJsonTerm} ->
+            {ok, OldJsonTerm} = application:get_env(App, FirstNameInJsonPath),
+            MergedJsonTerm = edit_config_merge(OldJsonTerm, NewJsonTerm),
+            ok = application:set_env(App, FirstNameInJsonPath, MergedJsonTerm),
+            edit_config(RemainingJsonTerm, RemainingAppSchemas)
+    end.
+
+edit_config_merge([], _NewJsonTerm) ->
+    [];
+edit_config_merge([OldObjectArray|Rest], [])
+  when is_list(OldObjectArray) ->
+    [OldObjectArray|Rest];
+edit_config_merge([OldObjectArray|OldJsonTerm],
+                  [[{Name, Value}|Rest] = NewObjectArray|NewJsonTerm])
+  when is_list(OldObjectArray) ->
+    case lists:keysearch(Name, 1, OldObjectArray) of
+        {value, {_, Value}} ->
+            [edit_config_merge(OldObjectArray, NewObjectArray)|
+             edit_config_merge(OldJsonTerm, NewJsonTerm)];
+        {value, {_, _}} ->
+            [OldObjectArray|edit_config_merge(OldJsonTerm, NewJsonTerm)]
+    end;
+edit_config_merge([{Name, OldValue}|OldJsonTerm],
+                  [{Name, NewValue}|NewJsonTerm])
+  when is_list(OldValue) ->
+    [{Name, edit_config_merge(OldValue, NewValue)}|
+     edit_config_merge(OldJsonTerm, NewJsonTerm)];
+edit_config_merge([{Name, _OldValue}|OldJsonTerm],
+                  [{Name, NewValue}|NewJsonTerm]) ->
+    [{Name, NewValue}|edit_config_merge(OldJsonTerm, NewJsonTerm)];
+edit_config_merge([{Name, OldValue}|OldJsonTerm], NewJsonTerm) ->
+    [{Name, OldValue}|edit_config_merge(OldJsonTerm, NewJsonTerm)].

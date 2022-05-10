@@ -41,7 +41,10 @@ spawn_server(ModuleName, InitState, MessageHandler,
 
 init(ModuleName, InitState, MessageHandler,
      #serv_options{name = Name, trap_exit = TrapExit} = Options, Parent) ->
-    true = put_options(Options, ModuleName, Parent, MessageHandler),
+    ok = put_options(Options#serv_options{
+                       module_name = ModuleName,
+                       parent = Parent,
+                       message_handler = MessageHandler}),
     true = register_server(Name),
     case TrapExit of
         true ->
@@ -63,11 +66,9 @@ init(ModuleName, InitState, MessageHandler,
             loop(MessageHandler, InitState)
     end.
 
-put_options(Options, ModuleName, Parent, MessageHandler) ->
-    undefined == put(serv_options,
-                     Options#serv_options{module_name = ModuleName,
-                                          parent = Parent,
-                                          message_handler = MessageHandler}).
+put_options(Options) ->
+    _ = put(serv_options, Options),
+    ok.
 
 get_options() ->
     get(serv_options).

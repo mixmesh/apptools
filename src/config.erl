@@ -1,5 +1,5 @@
 -module(config).
--export([lookup/1, lookup/2, lookup_children/2]).
+-export([lookup/1, lookup/2, lookup_children/2, edit_config/1]).
 
 %%
 %% Exported: lookup
@@ -45,3 +45,13 @@ lookup_children(Keys, [{Key, Value}|Rest]) ->
         false ->
             lookup_children(Keys, Rest)
     end.
+
+%%
+%% Exported: edit_config
+%%
+
+-spec edit_config(jsone:json_value()) ->
+          ok | {error, config_serv:error_reason()}.
+
+edit_config(JsonTerm) ->
+    config_serv:edit_config(JsonTerm).
