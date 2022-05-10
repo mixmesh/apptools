@@ -35,9 +35,7 @@
          system_get_state = not_set :: not_set | function(),
          system_replace_state = not_set :: not_set | function(),
          system_terminate = not_set :: not_set | function(),
-         write_debug = not_set :: not_set | fun(),
-         execution_timer :: reference(),
-         execution_time_left :: integer()}).
+         write_debug = not_set :: not_set | fun()}).
 
 -define(spawn_server(InitState, MessageHandler),
         serv:spawn_server(?MODULE, InitState, MessageHandler)).
