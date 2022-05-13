@@ -157,7 +157,7 @@ display(Em, Ti, IN, MaxScheduleTime) ->
 		    ok;
 		Tin ->
 		    Td = erlang:convert_time_unit((Ti - Tin),
-						  native, millisecond),
+						  nanosecond, millisecond),
 		    if Td > MaxScheduleTime ->
 			    io:format("Warning: pid=~p running for ~wms\n",
 				      [Pid,Td]);
