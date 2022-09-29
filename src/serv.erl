@@ -1,7 +1,7 @@
 -module(serv).
 -export([spawn_server/3, spawn_server/4]).
 -export([cast/2, call/2, call/3, reply/2]).
--export([l/1, lm/0]).
+-export([l/1, lm/0, trigger_serv_processes/2]).
 -export([system_code_change/4,
          system_continue/3,
          system_get_state/1,
