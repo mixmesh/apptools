@@ -60,7 +60,7 @@ reload_processes(ModuleName) ->
 %%
 
 init(Parent) ->
-    ?LOG_INFO("Gaia pulseaudio server has been started"),
+    ?LOG_INFO("Serv Manager has been started"),
     {ok, #{parent => Parent, processes => #{}}}.
 
 message_handler(#{parent := Parent, processes := Processes} = State) ->
