@@ -1,7 +1,7 @@
 -module(serv).
 -export([spawn_server/3, spawn_server/4]).
 -export([cast/2, call/2, call/3, reply/2]).
--export([l/1, lm/0, trigger_serv_processes/2]).
+-export([l/1, lm/0]).
 -export([system_code_change/4,
          system_continue/3,
          system_get_state/1,
@@ -12,6 +12,7 @@
 
 -export_type([name/0, spawn_server_result/0]).
 
+-include_lib("kernel/include/logger.hrl").
 -include("../include/serv.hrl").
 
 -type name() :: atom() | pid().
@@ -29,15 +30,22 @@ spawn_server(ModuleName, InitState, MessageHandler) ->
                  #serv_options{module_name = ModuleName}).
 
 spawn_server(ModuleName, InitState, MessageHandler,
-             #serv_options{timeout = Timeout, link = true} = Options) ->
-    proc_lib:start_link(
-      ?MODULE, init, [ModuleName, InitState, MessageHandler, Options, self()],
-      Timeout);
-spawn_server(ModuleName, InitState, MessageHandler,
-             #serv_options{timeout = Timeout, link = false} = Options) ->
-    proc_lib:start(
-      ?MODULE, init, [ModuleName, InitState, MessageHandler, Options, self()],
-      Timeout).
+             #serv_options{timeout = Timeout, link = Link} = Options) ->
+    StartFunction = start_function(Link),
+    case proc_lib:StartFunction(
+           ?MODULE, init,
+           [ModuleName, InitState, MessageHandler, Options, self()], Timeout) of
+        {ok, Pid} ->
+            _ = serv_manager:add_process(Pid),
+            {ok, Pid};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+start_function(true) ->
+    start_link;
+start_function(false) ->
+    start.
 
 init(ModuleName, InitState, MessageHandler,
      #serv_options{name = Name, trap_exit = TrapExit} = Options, Parent) ->
@@ -128,7 +136,7 @@ cast(To, Request) when is_pid(To) ->
 cast(To, Request) ->
     case whereis(To) of
         undefined ->
-            io:format("BAD: ~p\n", [{To, Request}]),
+            ?LOG_ERROR(#{bad => {To, Request}}),
             throw(badarg);
         Pid ->
             Pid ! {cast, Request},
@@ -189,31 +197,10 @@ reply({Pid, Ref}, Reply) ->
 l(Module) ->
     case c:l(Module) of
         {'module', Module} ->
-            ok = trigger_serv_processes(Module, processes()),
+            _ = serv_manager:reload_processes(Module),
             {'module', Module};
         OrElse ->
             OrElse
-    end.
-
-trigger_serv_processes(_Module, []) ->
-    ok;
-trigger_serv_processes(Module, [Pid|Rest]) ->
-    case process_info(Pid, current_function) of
-        {current_function, {Module, _FunctionName, _Arity}} ->
-            case process_info(Pid, dictionary) of
-                {dictionary, List} ->
-                    case lists:keysearch('$initial_call', 1, List) of
-                        {value, {_, {serv, init, 5}}} ->
-                            Pid ! {system, undefined, code_switch},
-                            trigger_serv_processes(Module, Rest);
-                        _ ->
-                            trigger_serv_processes(Module, Rest)
-                    end;
-                _ ->
-                    trigger_serv_processes(Module, Rest)
-            end;
-        _ ->
-            trigger_serv_processes(Module, Rest)
     end.
 
 %%

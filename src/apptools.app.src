@@ -3,4 +3,6 @@
  [{description,"Application tools"},
   {vsn, git},
   {modules, ["@@MODULES@@"]},
+  {registered, []},
+  {mod, {apptools_app, []}},
   {applications, [kernel, stdlib]}]}.
