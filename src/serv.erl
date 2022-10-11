@@ -1,7 +1,7 @@
 -module(serv).
 -export([spawn_server/3, spawn_server/4]).
 -export([cast/2, call/2, call/3, reply/2]).
--export([l/1, lm/0]).
+-export([l/1, lm/0, since_system_start/0, since_system_start/1]).
 -export([system_code_change/4,
          system_continue/3,
          system_get_state/1,
@@ -209,6 +209,17 @@ l(Module) ->
 
 lm() ->
     [l(Module) || Module <- code:modified_modules()].
+
+%%
+%% Exported: since_system_start
+%%
+
+since_system_start() ->
+    since_system_start(milli_seconds).
+
+since_system_start(Unit) ->
+    erlang:convert_time_unit(
+      erlang:monotonic_time() - erlang:system_info(start_time), native, Unit).
 
 %%
 %% Exported: system_code_changed
